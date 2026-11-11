@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Island World</title>
+<style>
+  :root { --glass: rgba(10, 22, 36, .68); --line: rgba(255,255,255,.18); --accent: #3b82f6; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: #fff;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-user-select: none; user-select: none; touch-action: none; }
+  canvas { display: block; }
+  button { font-family: inherit; }
+
+  /* minimap */
+  #minimapWrap { position: fixed; top: 12px; left: 12px; z-index: 9; }
+  #minimap { border-radius: 50%; border: 3px solid rgba(255,255,255,.85); box-shadow: 0 4px 18px rgba(0,0,0,.45); background: #1d4e75; cursor: pointer; display: block; }
+  #minimapWrap .cp { position: absolute; font-size: 12px; font-weight: 700; text-shadow: 0 1px 3px #000; pointer-events: none; }
+  #minimapWrap .n { top: -2px; left: 50%; transform: translateX(-50%); color: #ff6b6b; }
+  #minimapWrap .s { bottom: -2px; left: 50%; transform: translateX(-50%); }
+  #minimapWrap .w { left: -1px; top: 50%; transform: translateY(-50%); }
+  #minimapWrap .e { right: -1px; top: 50%; transform: translateY(-50%); }
+  #minimapWrap.big { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 30; }
+  #online { position: fixed; top: 16px; left: 198px; z-index: 9; background: var(--glass); border: 1px solid var(--line); padding: 8px 14px; border-radius: 999px; font-size: 14px; font-weight: 600; }
+  body.touch #online { left: auto; right: 10px; top: 10px; padding: 5px 11px; font-size: 12px; }
+
+  /* chat */
+  #chat { position: fixed; left: 14px; bottom: 14px; width: min(390px, 46vw); z-index: 9; }
+  #chatTabs { display: none; gap: 6px; margin-bottom: 6px; }
+  #chat.open #chatTabs, body:not(.touch) #chatTabs { display: flex; }
+  #chatTabs button { border: 1px solid var(--line); background: var(--glass); color: #fff; padding: 6px 16px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+  #chatTabs button.on { background: var(--accent); border-color: transparent; }
+  #chatlog { background: var(--glass); border-radius: 12px 12px 0 0; font-size: 14px; padding: 8px 10px; max-height: 150px; min-height: 22px; overflow: hidden; border: 1px solid var(--line); border-bottom: 0; text-shadow: 0 1px 2px #000; }
+  #chatlog:empty { display: none; }
+  #chatlog div { margin: 2px 0; word-break: break-word; }
+  #chatlog b { color: #8ec5ff; } #chatlog b.near { color: #7dffb3; } #chatlog .sys { opacity: .65; font-style: italic; }
+  #chatHint { background: var(--glass); border: 1px solid var(--line); border-radius: 0 0 12px 12px; padding: 9px 12px; font-size: 13px; opacity: .85; cursor: pointer; }
+  #chatlog:empty + form + #chatHint, #chatlog:empty ~ #chatHint { border-radius: 12px; }
+  #chatForm { display: none; gap: 6px; background: var(--glass); border: 1px solid var(--line); border-radius: 0 0 12px 12px; padding: 6px; }
+  #msg { flex: 1; min-width: 0; padding: 9px 10px; border: 0; border-radius: 8px; font-size: 16px; background: rgba(255,255,255,.92); color: #111; }
+  #chatForm button { padding: 9px 14px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 700; }
+  body.touch #chat { top: 134px; bottom: auto; width: min(280px, 60vw); }
+  body.touch #chat #chatlog { border-radius: 12px; border-bottom: 1px solid var(--line); max-height: 96px; background: rgba(10,22,36,.4); }
+  body.touch #chat.open #chatlog { border-radius: 12px 12px 0 0; border-bottom: 0; max-height: 150px; }
+  body.touch #chatHint { display: none !important; }
+
+  /* emotes */
+  #emotes { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; gap: 8px; z-index: 9; background: var(--glass); border: 1px solid var(--line); padding: 7px 9px; border-radius: 18px; }
+  .emote { position: relative; width: 46px; height: 46px; border-radius: 14px; border: 1px solid var(--line); background: rgba(255,255,255,.08); color: #fff; padding: 0; cursor: pointer; }
+  .emote .ic { font-size: 22px; line-height: 46px; } .emote .k { position: absolute; right: 6px; bottom: 3px; font-size: 11px; opacity: .7; }
+  .emote.on, .emote:hover { background: var(--accent); border-color: transparent; }
+  body.touch #emotes { display: none; left: auto; right: 12px; bottom: 218px; transform: none; padding: 5px 6px; gap: 5px; max-width: 250px; flex-wrap: wrap; justify-content: flex-end; }
+  body.touch #emotes.show { display: flex; }
+  body.touch .emote { width: 44px; height: 44px; } body.touch .emote .ic { line-height: 44px; font-size: 21px; } body.touch .emote .k { display: none; }
+
+  @media (max-width: 1250px) { body:not(.touch) #emotes { left: auto; right: 14px; transform: none; max-width: 262px; flex-wrap: wrap; justify-content: flex-end; } body:not(.touch) #interact { left: auto; right: 14px; transform: none; bottom: 150px; } }
+
+  /* interaction prompt + toast */
+  #interact { display: none; position: fixed; left: 50%; bottom: 104px; transform: translateX(-50%); z-index: 9; align-items: center; gap: 10px; background: var(--glass); border: 1px solid var(--line); border-radius: 12px; padding: 8px 16px 8px 8px; font-size: 16px; font-weight: 600; cursor: pointer; }
+  #interact .key { background: #fff; color: #111; border-radius: 7px; min-width: 28px; height: 28px; line-height: 28px; text-align: center; font-weight: 800; }
+  body.touch #interact { bottom: 170px; }
+  #toast { position: fixed; left: 50%; top: 22px; transform: translate(-50%, -20px); opacity: 0; z-index: 25; background: rgba(10,22,36,.85); border: 1px solid var(--line); padding: 10px 18px; border-radius: 12px; font-size: 14px; transition: opacity .25s, transform .25s; pointer-events: none; max-width: 80vw; text-align: center; }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  /* overlay */
+  #overlay { position: fixed; inset: 0; background: rgba(0,0,0,.62); display: flex; align-items: center; justify-content: center; text-align: center; z-index: 40; padding: 16px; }
+  #overlay h1 { margin: 0 0 8px; font-size: 32px; }
+  #status { opacity: .85; margin-bottom: 14px; }
+  #play { font-size: 18px; padding: 12px 30px; border: 0; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 700; }
+  #play:disabled { opacity: .4; }
+  #help { margin-top: 18px; font-size: 13px; line-height: 1.8; opacity: .85; }
+  kbd { background: rgba(255,255,255,.18); border-radius: 5px; padding: 1px 6px; font-family: inherit; }
+
+
+  /* avatar button + customizer */
+  #btnCustom { position: fixed; top: 16px; left: 312px; z-index: 9; background: var(--glass); border: 1px solid var(--line); color: #fff; padding: 8px 14px; border-radius: 999px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  #btnCustom:hover { background: var(--accent); }
+  body.touch #btnCustom { left: auto; right: 10px; top: 98px; width: 44px; height: 44px; padding: 0; font-size: 0; text-align: center; }
+  body.touch #btnCustom::before { content: '👤'; font-size: 20px; line-height: 40px; }
+  #playCustom { margin-left: 10px; font-size: 16px; padding: 12px 22px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.1); color: #fff; font-weight: 600; cursor: pointer; }
+  #custom { position: fixed; inset: 0; z-index: 60; background: rgba(5,10,18,.8); display: none; align-items: center; justify-content: center; padding: 12px; touch-action: auto; -webkit-user-select: none; user-select: none; }
+  #custom.open { display: flex; }
+  .cz-panel { width: min(920px, 100%); max-height: 100%; background: linear-gradient(160deg, #1b2440, #131829); border: 1px solid rgba(255,255,255,.14); border-radius: 18px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+  .cz-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; font-size: 20px; font-weight: 700; border-bottom: 1px solid rgba(255,255,255,.08); }
+  .cz-x { background: none; border: 0; color: #fff; font-size: 22px; cursor: pointer; }
+  .cz-body { display: flex; gap: 18px; padding: 16px 18px; overflow: auto; min-height: 0; }
+  .cz-left { flex: 0 0 300px; }
+  .cz-stage { position: relative; width: 300px; height: 410px; border-radius: 14px; background: radial-gradient(circle at 50% 38%, #3b4b88, #151b30 72%); overflow: hidden; touch-action: none; }
+  .cz-stage canvas { width: 100%; height: 100%; display: block; cursor: grab; }
+  .cz-rot { position: absolute; bottom: 10px; width: 42px; height: 42px; border-radius: 50%; border: 1px solid rgba(255,255,255,.25); background: rgba(0,0,0,.35); color: #fff; font-size: 20px; cursor: pointer; }
+  .cz-rot.l { left: 10px; } .cz-rot.r { right: 10px; }
+  .cz-hint { text-align: center; font-size: 12px; opacity: .6; margin-top: 8px; }
+  .cz-right { flex: 1; min-width: 0; }
+  .cz-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+  .cz-tabs button { padding: 9px 16px; border-radius: 10px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06); color: #fff; font-weight: 600; cursor: pointer; font-size: 14px; }
+  .cz-tabs button.on { background: #2f7bff; border-color: transparent; }
+  .cz-sec { margin-bottom: 16px; } .cz-sec h4 { margin: 0 0 8px; font-size: 13px; opacity: .8; font-weight: 600; }
+  .cz-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .cz-sw { width: 38px; height: 38px; border-radius: 50%; border: 3px solid rgba(255,255,255,.22); cursor: pointer; padding: 0; }
+  .cz-sw.on { border-color: #fff; box-shadow: 0 0 0 2px #2f7bff; }
+  .cz-seg { padding: 9px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.06); color: #fff; cursor: pointer; font-weight: 600; font-size: 14px; }
+  .cz-seg.on { background: #2f7bff; border-color: transparent; }
+  .cz-face { width: 76px; height: 64px; border-radius: 12px; border: 3px solid rgba(255,255,255,.2); padding: 0; overflow: hidden; cursor: pointer; background: #000; }
+  .cz-face.on { border-color: #2f7bff; } .cz-face canvas { width: 100%; height: 100%; display: block; }
+  .cz-card { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.06); color: #fff; cursor: pointer; font-weight: 600; font-size: 14px; }
+  .cz-card.on { background: #2f7bff; border-color: transparent; } .cz-card .ic { font-size: 22px; }
+  .cz-card .dots { display: inline-flex; } .cz-card .dots i { width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(255,255,255,.7); margin-right: -5px; display: block; }
+  .cz-foot { display: flex; gap: 10px; padding: 12px 18px; border-top: 1px solid rgba(255,255,255,.08); align-items: center; }
+  .cz-foot .sp { flex: 1; }
+  .cz-foot button { padding: 10px 18px; border-radius: 10px; border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.08); color: #fff; font-weight: 600; cursor: pointer; font-size: 14px; }
+  .cz-foot .cz-save { background: #2f7bff; border-color: transparent; }
+  @media (max-width: 760px) { .cz-body { flex-direction: column; gap: 10px; } .cz-left { flex: none; } .cz-stage { width: 100%; height: 250px; } .cz-hint { display: none; } }
+
+  /* touch controls */
+  #touchpad { position: fixed; inset: 0; z-index: 4; display: none; }
+  #stick { position: fixed; width: 100px; height: 100px; margin: -50px 0 0 -50px; border-radius: 50%; border: 2px solid rgba(255,255,255,.4); z-index: 5; display: none; pointer-events: none; }
+  #knob { position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%; background: rgba(255,255,255,.45); }
+  #tbtns { position: fixed; right: 12px; bottom: 24px; display: none; grid-template-columns: repeat(2, 60px); gap: 10px; z-index: 8; }
+  .tb { width: 60px; height: 60px; border-radius: 50%; border: 2px solid rgba(255,255,255,.55); background: rgba(0,0,0,.4); color: #fff; font-size: 12px; }
+  #btnChat { position: fixed; top: 46px; right: 10px; z-index: 8; display: none; width: 44px; height: 44px; font-size: 20px; }
+  body.touch #touchpad, body.touch #btnChat { display: block; }
+  body.touch #tbtns { display: grid; }
+</style>
+</head>
+<body>
+<div id="minimapWrap">
+  <canvas id="minimap" width="172" height="172"></canvas>
+  <span class="cp n">N</span><span class="cp s">S</span><span class="cp w">W</span><span class="cp e">E</span>
+</div>
+<div id="online">Online: 1</div>
+<button id="btnCustom">👤 Avatar · C</button>
+
+<div id="chat">
+  <div id="chatTabs"><button data-tab="all" class="on">All</button><button data-tab="nearby">Nearby</button></div>
+  <div id="chatlog"></div>
+  <form id="chatForm" autocomplete="off"><input id="msg" maxlength="200" placeholder="Say something..."><button type="submit">Send</button></form>
+  <div id="chatHint">Press <b>Enter</b> to chat · <b>Tab</b> switches All / Nearby</div>
+</div>
+
+<div id="emotes"></div>
+<div id="interact"><span class="key">E</span><span id="ilabel"></span></div>
+<div id="toast"></div>
+
+<div id="touchpad"></div>
+<div id="stick"><div id="knob"></div></div>
+<div id="tbtns">
+  <button class="tb" id="btnJump">Jump</button>
+  <button class="tb" id="btnFly">Fly</button>
+  <button class="tb" id="btnView">View</button>
+  <button class="tb" id="btnRun">Run</button>
+  <button class="tb" id="btnEmote">😀</button>
+</div>
+<button class="tb" id="btnChat">💬</button>
+
+<div id="overlay">
+  <div>
+    <h1>Island World</h1>
+    <div id="status">Starting...</div>
+    <button id="play" disabled>Play</button><button id="playCustom">👤 Customize avatar</button>
+    <div id="help">
+      <b>Desktop:</b> <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>E</kbd> interact · <kbd>1</kbd>-<kbd>9</kbd> emotes<br>
+      <kbd>V</kbd> first / third person · <kbd>M</kbd> big map · <kbd>C</kbd> avatar · <kbd>F</kbd> fly · <kbd>Enter</kbd> chat<br>
+      <b>Phone:</b> left thumb moves · drag right side to look · tap the minimap to enlarge it
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "/three/build/three.module.js", "three/addons/": "/three/examples/jsm/" } }
+</script>
+<script type="module" src="/main.js"></script>
+</body>
+</html>
