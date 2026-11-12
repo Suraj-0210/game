@@ -14,6 +14,9 @@ const LIMIT = 2000;
 const NEARBY = 45; // metres for nearby chat
 const COLORS = [0xd63031, 0x0984e3, 0x00b894, 0xfdcb6e, 0x6c5ce7, 0xe84393, 0xe17055, 0x00cec9];
 const players = {};
+// hotel doors that are currently open (id -> true). Open doors close by themselves after a while.
+const doors = {}, doorTimers = {};
+const DOOR_OPEN_MS = 45000;
 const isNum = (v) => typeof v === "number" && Number.isFinite(v);
 
 // Avatar appearance is a small set of palette indices. Never trust the client: clamp everything.
@@ -46,7 +49,7 @@ io.on("connection", (socket) => {
       hasPos: false,
     };
     players[socket.id] = player;
-    socket.emit("init", { selfId: socket.id, players });
+    socket.emit("init", { selfId: socket.id, players, serverTime: Date.now(), doors }); // the shared clock drives the weather
     socket.broadcast.emit("playerJoined", player);
   });
 
@@ -57,6 +60,25 @@ io.on("connection", (socket) => {
     player.x = m.x; player.y = m.y; player.z = m.z; player.ry = m.ry; player.em = em;
     player.hasPos = true;
     socket.broadcast.emit("playerMoved", { id: player.id, x: m.x, y: m.y, z: m.z, ry: m.ry, em });
+  });
+
+  // voice chat handshakes (WebRTC offers/answers/ICE) are only relayed; the audio itself never touches the server
+  let rtcCount = 0, rtcWindow = Date.now();
+  socket.on("rtc", (m) => {
+    if (!player || !m || typeof m.to !== "string" || !players[m.to] || !["offer", "answer", "candidate"].includes(m.kind)) return;
+    if (Date.now() - rtcWindow > 1000) { rtcWindow = Date.now(); rtcCount = 0; }
+    if (++rtcCount > 80) return; // basic flood protection
+    io.to(m.to).emit("rtc", { from: socket.id, kind: m.kind, data: m.data });
+  });
+
+  socket.on("door", (d) => {
+    if (!player || !d || typeof d.id !== "string" || !/^[a-z0-9_]{1,24}$/.test(d.id) || typeof d.open !== "boolean") return;
+    clearTimeout(doorTimers[d.id]);
+    if (d.open) {
+      doors[d.id] = true;
+      doorTimers[d.id] = setTimeout(() => { delete doors[d.id]; io.emit("door", { id: d.id, open: false }); }, DOOR_OPEN_MS);
+    } else delete doors[d.id];
+    socket.broadcast.emit("door", { id: d.id, open: d.open });
   });
 
   socket.on("avatar", (a) => {

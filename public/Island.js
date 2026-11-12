@@ -161,3 +161,40 @@ export function findTownSite() {
   }
   return best;
 }
+
+// Ground cover: shrubs and ferns under the trees, grass tufts on the meadows. Deterministic.
+export function scatterGround(terrain, exclusions = [], density = 1) {
+  const out = { shrubs: [], ferns: [], grass: [] };
+  const pass = (CELL, salt, fn) => {
+    for (let gz = -HALF + 2; gz < HALF - 2; gz += CELL) {
+      for (let gx = -HALF + 2; gx < HALF - 2; gx += CELL) {
+        const ix = Math.round(gx * 10), iz = Math.round(gz * 10);
+        const x = gx + (hash2(ix, iz, salt) - 0.5) * CELL * 0.95, z = gz + (hash2(ix, iz, salt + 1) - 0.5) * CELL * 0.95;
+        const h = terrain.height(x, z);
+        if (h < 1.5 || h > 42) continue;
+        if (exclusions.some((e) => Math.hypot(x - e.x, z - e.z) < e.r)) continue;
+        const ny = terrain.normalY(x, z);
+        fn(x, z, h, ny, hash2(ix, iz, salt + 2), hash2(ix, iz, salt + 3), hash2(ix, iz, salt + 4));
+      }
+    }
+  };
+  const forestAt = (x, z) => fbm(x / 70 + 5, z / 70 + 9, 3, 91);
+  pass(4, 301, (x, z, h, ny, r1, r2, r3) => {
+    if (ny < 0.72) return;
+    const f = forestAt(x, z), p = (f > 0.4 ? 0.14 + f * 0.5 : 0.025) * density;
+    if (r1 < p) out.shrubs.push({ x, z, y: h, s: 0.7 + r2 * 0.8, a: r3 * 6.283, k: r2 });
+  });
+  pass(3.4, 401, (x, z, h, ny, r1, r2, r3) => {
+    if (ny < 0.75 || h < 2.5) return;
+    const f = forestAt(x, z);
+    if (f > 0.42 && r1 < 0.34 * density) out.ferns.push({ x, z, y: h, s: 0.8 + r2 * 0.7, a: r3 * 6.283, k: r2 });
+  });
+  pass(2.3, 501, (x, z, h, ny, r1, r2, r3) => {
+    if (ny < 0.84) return;
+    const f = forestAt(x, z);
+    if (r1 > (0.62 - f * 0.25) * density) return;
+    if (splatAt(x, z, h, ny)[1] < 0.55) return;
+    out.grass.push({ x, z, y: h, s: 0.75 + r2 * 0.7, a: r3 * 6.283, k: r2 });
+  });
+  return out;
+}

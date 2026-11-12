@@ -1,6 +1,8 @@
 // Beach town layout. Pure data (no rendering) so it can be tested and shared.
 // Town-local axes: +z points out to sea, +x is to the right when facing the sea. y is absolute (world).
 import { hash3 } from './island.js';
+import { planHotel, HOTEL } from './hotel.js';
+import { planInteriors, INTERIOR_IDS } from './interiors.js';
 
 export const FLATTEN = { r0: 38, r1: 74 };
 const FRONT = 14;                 // z of building fronts
@@ -11,6 +13,7 @@ export function planTown(terrain, site) {
   const sinT = Math.sin(theta), cosT = Math.cos(theta);
   const toW = (lx, lz) => ({ x: cx + lx * cosT + lz * sinT, z: cz - lx * sinT + lz * cosT });
   const gh = (lx, lz) => { const p = toW(lx, lz); return terrain.height(p.x, p.z); };
+  const toLocal = (x, z) => ({ lx: (x - cx) * cosT - (z - cz) * sinT, lz: (x - cx) * sinT + (z - cz) * cosT });
 
   let shoreZ = 20;
   while (shoreZ < 140 && gh(0, shoreZ) > 0.15) shoreZ++;
@@ -18,7 +21,7 @@ export function planTown(terrain, site) {
   const endZ = Math.max(shoreZ + 34, 62);
 
   const plan = {
-    site, theta, toW, gh, shoreZ, deckY, endZ,
+    site, theta, toW, toLocal, gh, shoreZ, deckY, endZ,
     buildings: [], decks: [], boxes: [], circles: [], interactables: [], palms: [],
     benches: [], lamps: [], umbrellas: [], crates: [], boats: [], landmarks: [], exclusions: [],
     ludo: null, lighthouse: null,
@@ -33,15 +36,29 @@ export function planTown(terrain, site) {
     { id: 'cafe', sign: 'CAFE', x: -18, w: 9, d: 8, h: 4.6, wall: 0xf2e6cf, roof: 0xb5532f, awning: [0xd63031, 0xffffff], label: 'Order a drink', chimney: true },
     { id: 'games', sign: 'PLAY', x: -3, w: 12, d: 9, h: 5.4, wall: 0x2fb5a8, roof: 0x2d3a4a, neon: true, label: 'Games hall' },
     { id: 'shop', sign: 'SHOP', x: 12, w: 9, d: 8, h: 4.6, wall: 0xf0c24f, roof: 0xb5532f, awning: [0x0984e3, 0xffffff], label: 'Open shop' },
-    { id: 'hotel', sign: 'HOTEL', x: 26, w: 11, d: 9, h: 7.6, wall: 0x9fc9e8, roof: 0xb5532f, floors: 2, label: 'Check in' },
+    { id: 'hotel', sign: 'HOTEL', x: 26, w: 14, d: 16, h: 10.2, rh: 3.0, wall: 0x9fc9e8, roof: 0xb5532f, floors: 3, label: 'Check in' },
   ];
   for (const b of defs) {
     const z = FRONT - b.d / 2;
     plan.buildings.push({ ...b, z, y: deckY });
+    if (b.id === 'hotel' || INTERIOR_IDS.includes(b.id)) continue; // hollow buildings: walls, doors and rooms come from hotel.js / interiors.js
     addBox(b.x, z, b.w / 2 + 0.1, b.d / 2 + 0.1, deckY - 2.5, deckY + b.h + 0.28 * b.d + 0.4);
     const door = toW(b.x, FRONT + 1.4);
     plan.interactables.push({ id: 'door_' + b.id, type: 'shop', soon: true, x: door.x, z: door.z, y: deckY, radius: 2.4, label: b.label });
   }
+
+  // ---- the hotel interior (3 floors, stairs, rooms) ----
+  plan.hotel = planHotel({ toW, theta, deckY });
+  plan.boxes.push(...plan.hotel.boxes); plan.circles.push(...plan.hotel.circles);
+  plan.interactables.push(...plan.hotel.interactables);
+  plan.decks.push(...plan.hotel.decks);
+
+  // ---- café, shop, rentals and games hall interiors ----
+  plan.extra = planInteriors({ toW, theta, deckY, buildings: plan.buildings });
+  plan.boxes.push(...plan.extra.boxes); plan.circles.push(...plan.extra.circles);
+  plan.interactables.push(...plan.extra.interactables); plan.decks.push(...plan.extra.decks);
+  // rectangles (town-local) where you are "indoors": no rain, quieter wind
+  plan.indoorBounds = plan.buildings.filter((b) => b.id === 'hotel' || INTERIOR_IDS.includes(b.id)).map((b) => ({ x0: b.x - b.w / 2 + 0.1, x1: b.x + b.w / 2 - 0.1, z0: b.z - b.d / 2 + 0.1, z1: b.z + b.d / 2 - 0.1, y0: deckY - 0.3, y1: deckY + b.h - 0.3 }));
 
   // ---- decks (also used as walkable surfaces) ----
   addDeck(0, (PROM.z0 + PROM.z1) / 2, 37, (PROM.z1 - PROM.z0) / 2, deckY);               // promenade
@@ -122,13 +139,17 @@ export function planTown(terrain, site) {
   return plan;
 }
 
-// Is the point on one of the town's walkable decks? Returns the deck height or -Infinity.
-export function deckHeightAt(plan, x, z) {
+// Walkable town surfaces (decks, hotel floors, stairs). With refY (your feet height) only surfaces you can step onto
+// are considered, so an upper floor does not pull you up from below; without refY the highest one wins.
+export function deckHeightAt(plan, x, z, refY) {
   let y = -Infinity;
   for (const d of plan.decks) {
     const dx = x - d.x, dz = z - d.z, c = Math.cos(d.theta), s = Math.sin(d.theta);
     const lx = dx * c - dz * s, lz = dx * s + dz * c;
-    if (Math.abs(lx) <= d.hw && Math.abs(lz) <= d.hd && d.y > y) y = d.y;
+    if (Math.abs(lx) > d.hw || Math.abs(lz) > d.hd) continue;
+    const dy = d.ramp ? d.ramp.y0 + ((lx + d.hw) / (2 * d.hw)) * (d.ramp.y1 - d.ramp.y0) : d.y;
+    if (refY !== undefined && dy > refY + 0.55) continue;
+    if (dy > y) y = dy;
   }
   return y;
 }

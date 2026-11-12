@@ -164,6 +164,18 @@ export function createHUD({ isTouch, onEmote, onInteract, onChatSubmit }) {
       state.activeEmote = id;
       bar.querySelectorAll('.emote').forEach((b) => b.classList.toggle('on', +b.dataset.id === id));
     },
+    setMic(on) { const b = $('btnMic'); b.classList.toggle('on', on); b.querySelector('.t').textContent = on ? 'Mic on · G' : 'Mic · G'; },
+    setSpeakers(list, selfSpeaking, onMute) {
+      const box = $('speakers');
+      box.innerHTML = '';
+      if (selfSpeaking) { const c = document.createElement('div'); c.className = 'chip me'; c.textContent = '🎤 You'; box.appendChild(c); }
+      for (const s of list) {
+        const c = document.createElement('div'); c.className = 'chip' + (s.muted ? ' muted' : ''); c.title = 'Click to mute / unmute';
+        c.textContent = (s.muted ? '🔇 ' : '🔊 ') + s.name;
+        c.addEventListener('click', () => onMute(s.id)); c.addEventListener('touchstart', (e) => { e.preventDefault(); onMute(s.id); }, { passive: false });
+        box.appendChild(c);
+      }
+    },
     initMinimap, drawMinimap, toggleMap,
     isBigMap: () => state.bigMap,
   };

@@ -2,13 +2,20 @@ import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { io } from '/socket.io/socket.io.esm.min.js';
-import { Terrain, scatter, splatAt, findTownSite, SIZE, HALF } from './island.js';
+import { Terrain, scatter, scatterGround, splatAt, findTownSite, SIZE, HALF } from './island.js';
 import { planTown, deckHeightAt, FLATTEN } from './town.js';
 import { buildTown } from './townmesh.js';
-import { makeTextures, signTexture, ludoBoardTexture, lighthouseTexture } from './textures.js';
+import { HOTEL } from './hotel.js';
+import { makeTextures, signTexture, ludoBoardTexture, lighthouseTexture, chessBoardTexture } from './textures.js';
 import { createHUD } from './hud.js';
 import { createAvatar, animateAvatar, sanitizeAvatar, DEFAULT_AVATAR, MAX_EMOTE } from './avatar.js';
 import { createCustomizer } from './customize.js';
+import { weatherAt, describe, MODES, MODE_LABEL } from './weather.js';
+import { makeFoliage } from './foliage.js';
+import { createVegetation } from './vegetation.js';
+import { createClouds, createRain } from './atmosphere.js';
+import { createAudio } from './audio.js';
+import { createVoice } from './voice.js';
 
 const $ = (id) => document.getElementById(id);
 const isTouch = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
@@ -74,9 +81,14 @@ if (!LITE) {
 }
 
 const tex = makeTextures(Math.min(8, renderer.capabilities.getMaxAnisotropy()));
+Object.assign(tex, makeFoliage(Math.min(8, renderer.capabilities.getMaxAnisotropy())));
+const windU = { uTime: { value: 0 }, uWindV: { value: new THREE.Vector4(1, 0, 0.3, 0.2) } };
+const terrainWet = { value: 0 };
+const BASE_EXPOSURE = 0.78, BASE_SUN = 3.0;
 
 // ======================= world state =======================
 let terrain = null, plan = null, town = null;
+const doorBoxes = new Map(), doorOpen = new Map();
 const circles = new Map(), boxes = new Map(); // spatial hashes of solid things (8 m cells), each with a vertical extent
 const CKEY = (cx, cz) => cx * 4096 + cz;
 const BIG = 1e9;
@@ -89,7 +101,8 @@ function addCollider(x, z, r, y0 = -BIG, y1 = BIG) {
 function addBoxCollider(b) {
   const c = Math.cos(b.theta), s = Math.sin(b.theta);
   const rx = Math.abs(c) * b.hw + Math.abs(s) * b.hd, rz = Math.abs(s) * b.hw + Math.abs(c) * b.hd;
-  const e = { x: b.x, z: b.z, hw: b.hw, hd: b.hd, c, s, y0: b.y0 === undefined ? -BIG : b.y0, y1: b.y1 === undefined ? BIG : b.y1 };
+  const e = { x: b.x, z: b.z, hw: b.hw, hd: b.hd, c, s, y0: b.y0 === undefined ? -BIG : b.y0, y1: b.y1 === undefined ? BIG : b.y1, fly: !!b.fly, off: false };
+  if (b.door) { if (!doorBoxes.has(b.door)) doorBoxes.set(b.door, []); doorBoxes.get(b.door).push(e); }
   for (let cz = Math.floor((b.z - rz) / 8); cz <= Math.floor((b.z + rz) / 8); cz++)
     for (let cx = Math.floor((b.x - rx) / 8); cx <= Math.floor((b.x + rx) / 8); cx++) {
       const k = CKEY(cx, cz);
@@ -110,6 +123,7 @@ function blocked(x, z, pr, py) {
     }
     const bx = boxes.get(k);
     if (bx) for (const b of bx) {
+      if (b.off || (b.fly && !player.fly)) continue;      // open doors and ceilings (ceilings only stop flyers)
       if (py !== undefined && (top < b.y0 || py > b.y1)) continue;
       const ddx = x - b.x, ddz = z - b.z, lx = ddx * b.c - ddz * b.s, lz = ddx * b.s + ddz * b.c;
       const ex = Math.max(Math.abs(lx) - b.hw, 0), ez = Math.max(Math.abs(lz) - b.hd, 0);
@@ -119,13 +133,15 @@ function blocked(x, z, pr, py) {
   return false;
 }
 // Walking surface: natural terrain, or a town deck if one is higher
-function ground(x, z) {
+// refY (your feet height) picks the right hotel floor: an upper floor never pulls you up from below
+function ground(x, z, refY) {
   let g = terrain.height(x, z);
-  if (plan && Math.abs(x - plan.site.x) < 95 && Math.abs(z - plan.site.z) < 95) { const d = deckHeightAt(plan, x, z); if (d > g) g = d; }
+  if (plan && Math.abs(x - plan.site.x) < 95 && Math.abs(z - plan.site.z) < 95) { const d = deckHeightAt(plan, x, z, refY); if (d > g) g = d; }
   return g;
 }
 // Same formula as the water shader, so boats float on the visible waves
-const waveHeight = (x, z, t) => Math.sin(x * 0.045 + t * 0.9) * 0.35 + Math.sin(z * 0.06 - t * 0.7 + x * 0.02) * 0.28 + Math.sin((x + z) * 0.11 + t * 1.4) * 0.12;
+let waveAmp = 1;
+const waveHeight = (x, z, t) => waveAmp * (Math.sin(x * 0.045 + t * 0.9) * 0.35 + Math.sin(z * 0.06 - t * 0.7 + x * 0.02) * 0.28 + Math.sin((x + z) * 0.11 + t * 1.4) * 0.12);
 
 // ======================= terrain meshes =======================
 let terrainMat = null, water = null, waterUniforms = null, farOcean = null;
@@ -137,11 +153,12 @@ function buildTerrain() {
     shader.uniforms.tGrass = { value: tex.grass };
     shader.uniforms.tRock = { value: tex.rock };
     shader.uniforms.tDirt = { value: tex.dirt };
+    shader.uniforms.uWet = terrainWet;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 splat;\nvarying vec4 vSplat;\nvarying vec2 vTW;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSplat = splat;\nvTW = position.xz;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform sampler2D tSand;\nuniform sampler2D tGrass;\nuniform sampler2D tRock;\nuniform sampler2D tDirt;\nvarying vec4 vSplat;\nvarying vec2 vTW;')
+      .replace('#include <common>', '#include <common>\nuniform sampler2D tSand;\nuniform sampler2D tGrass;\nuniform sampler2D tRock;\nuniform sampler2D tDirt;\nuniform float uWet;\nvarying vec4 vSplat;\nvarying vec2 vTW;')
       .replace('#include <map_fragment>', `
         vec2 p = vTW;
         vec3 sandC  = mix(texture2D(tSand,  p * 0.33).rgb, texture2D(tSand,  p * 0.047).rgb, 0.45);
@@ -151,6 +168,7 @@ function buildTerrain() {
         vec3 albedo = sandC * vSplat.x + grassC * vSplat.y + rockC * vSplat.z + dirtC * vSplat.w;
         float macro = texture2D(tGrass, p * 0.0043).r;
         albedo *= 0.8 + 0.45 * macro;
+        albedo *= mix(1.0, 0.6, uWet);
         diffuseColor.rgb *= albedo;
       `);
   };
@@ -195,18 +213,18 @@ function buildWater() {
   depthTex.wrapS = depthTex.wrapT = THREE.ClampToEdgeWrapping;
   depthTex.needsUpdate = true;
 
-  waterUniforms = { uTime: { value: 0 }, uSize: { value: SIZE }, tDepth: { value: depthTex }, tNormal: { value: tex.waterNormal }, tNoise: { value: tex.noise } };
+  waterUniforms = { uTime: { value: 0 }, uSize: { value: SIZE }, tDepth: { value: depthTex }, tNormal: { value: tex.waterNormal }, tNoise: { value: tex.noise }, uAmp: { value: 1 }, uRain: { value: 0 }, uCover: { value: 0 } };
   const mat = new THREE.MeshStandardMaterial({ color: 0x1a6a8a, roughness: 0.07, metalness: 0, transparent: true, depthWrite: false, envMapIntensity: 0.85 });
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, waterUniforms);
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform float uTime;\nvarying vec2 vWXZ;')
+      .replace('#include <common>', '#include <common>\nuniform float uTime;\nuniform float uAmp;\nvarying vec2 vWXZ;')
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         vec4 wp = modelMatrix * vec4(transformed, 1.0);
         vWXZ = wp.xz;
-        transformed.y += sin(wp.x * 0.045 + uTime * 0.9) * 0.35 + sin(wp.z * 0.06 - uTime * 0.7 + wp.x * 0.02) * 0.28 + sin((wp.x + wp.z) * 0.11 + uTime * 1.4) * 0.12;`);
+        transformed.y += uAmp * (sin(wp.x * 0.045 + uTime * 0.9) * 0.35 + sin(wp.z * 0.06 - uTime * 0.7 + wp.x * 0.02) * 0.28 + sin((wp.x + wp.z) * 0.11 + uTime * 1.4) * 0.12);`);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uTime;\nuniform float uSize;\nuniform sampler2D tDepth;\nuniform sampler2D tNormal;\nuniform sampler2D tNoise;\nvarying vec2 vWXZ;')
+      .replace('#include <common>', '#include <common>\nuniform float uTime;\nuniform float uSize;\nuniform sampler2D tDepth;\nuniform sampler2D tNormal;\nuniform sampler2D tNoise;\nuniform float uRain;\nuniform float uCover;\nvarying vec2 vWXZ;')
       .replace('#include <map_fragment>', `
         float depth = texture2D(tDepth, (vWXZ + uSize * 0.5) / uSize).r;
         float dk = smoothstep(0.0, 0.5, depth);
@@ -214,13 +232,15 @@ function buildWater() {
         float fn = texture2D(tNoise, vWXZ * 0.08 + vec2(uTime * 0.03, 0.0)).r;
         float foam = (1.0 - smoothstep(0.0, 0.035 + 0.03 * sin(uTime * 1.5 + vWXZ.x * 0.3), depth)) * smoothstep(0.42, 0.62, fn) * 0.85;
         wcol = mix(wcol, vec3(0.95), foam);
-        diffuseColor.rgb = wcol;
+        diffuseColor.rgb = wcol * (1.0 - 0.38 * uCover);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.33))), uCover * 0.35);
         diffuseColor.a = max(mix(0.6, 0.97, dk), foam);
       `)
       .replace('#include <normal_fragment_maps>', `
         vec3 n1 = texture2D(tNormal, vWXZ * 0.045 + vec2(uTime * 0.020, uTime * 0.012)).xyz * 2.0 - 1.0;
         vec3 n2 = texture2D(tNormal, vWXZ * 0.110 + vec2(-uTime * 0.016, uTime * 0.025)).xyz * 2.0 - 1.0;
-        vec3 nw = normalize(vec3((n1.x + n2.x) * 0.6, 1.0, (n1.y + n2.y) * 0.6));
+        vec3 n3 = texture2D(tNormal, vWXZ * 0.9 + vec2(uTime * 0.6, -uTime * 0.5)).xyz * 2.0 - 1.0;
+        vec3 nw = normalize(vec3((n1.x + n2.x) * 0.6 + n3.x * uRain * 0.9, 1.0, (n1.y + n2.y) * 0.6 + n3.y * uRain * 0.9));
         normal = normalize((viewMatrix * vec4(nw, 0.0)).xyz);
       `);
   };
@@ -238,153 +258,54 @@ function buildWater() {
 }
 
 // ======================= vegetation =======================
-function lumpy(geo, amount, seed) {
-  const p = geo.attributes.position;
-  const h = (x, y, z) => { const s = Math.sin(x * 12.9898 + y * 78.233 + z * 37.719 + seed) * 43758.5453; return s - Math.floor(s); };
-  for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
-    const k = 1 + (h(Math.round(x * 50) / 50, Math.round(y * 50) / 50, Math.round(z * 50) / 50) - 0.5) * amount;
-    p.setXYZ(i, x * k, y * k, z * k);
-  }
-  geo.computeVertexNormals();
-  return geo;
-}
-function broadleafGeometry() {
-  const blobs = [[0, 0, 0, 1], [0.7, -0.25, 0.2, 0.75], [-0.6, -0.15, -0.4, 0.8], [0.1, 0.5, -0.3, 0.7]];
-  return mergeGeometries(blobs.map(([x, y, z, r], i) => {
-    const g = lumpy(new THREE.IcosahedronGeometry(r, LITE ? 0 : 1), LITE ? 0.3 : 0.35, i * 3.1);
-    g.translate(x, y, z);
-    return g;
-  }));
-}
-function pineGeometry() {
-  const parts = [[2.3, 2.8, 0.0], [1.8, 2.6, 1.7], [1.25, 2.4, 3.3]].map(([r, h, y]) => new THREE.ConeGeometry(r, h, 9).translate(0, y + h / 2, 0));
-  return mergeGeometries(parts);
-}
-function palmCrownGeometry() {
-  const fronds = [], N = 9, S = 6, L = 3.2;
-  for (let f = 0; f < N; f++) {
-    const pos = [], uv = [], idx = [];
-    for (let s = 0; s <= S; s++) {
-      const u = s / S, w = 0.75 * Math.sin(Math.PI * (0.12 + 0.88 * u)) * (1 - u * 0.5) + 0.04;
-      const x = u * L, y = L * (0.32 * u - 0.62 * u * u);
-      for (const side of [-1, 1]) { pos.push(x, y + 0.12 * w, side * w); uv.push(u, side < 0 ? 1 : 0); }
-      if (s < S) { const a = s * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-    g.setIndex(idx);
-    g.rotateZ((f % 3 - 1) * 0.18);
-    g.rotateY((f / N) * Math.PI * 2 + (f % 2) * 0.2);
-    g.computeVertexNormals();
-    fronds.push(g);
-  }
-  return mergeGeometries(fronds);
-}
-
-const vegMeshes = [], VEG_RANGE = LITE ? 300 : 650;
-function cullVegetation(px, pz) {
-  for (const m of vegMeshes) {
-    const c = m.boundingSphere.center;
-    m.visible = Math.hypot(c.x - px, c.z - pz) - m.boundingSphere.radius < VEG_RANGE;
-  }
-}
+let vegetation = null;
 function buildVegetation() {
-  const sc = scatter(terrain, plan ? plan.exclusions : []);
-  if (plan) sc.palms.push(...plan.palms);
-  const trunkGeo = new THREE.CylinderGeometry(0.1, 0.2, 1, 7).translate(0, 0.5, 0);
-  const palmGeo = palmCrownGeometry(), broadGeo = broadleafGeometry(), pineGeo = pineGeometry();
-  const rockGeo = lumpy(new THREE.IcosahedronGeometry(1, 1), 0.45, 5.5);
-  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6b513a, roughness: 1, envMapIntensity: 0.4 });
-  const leafMat = new THREE.MeshStandardMaterial({ map: tex.leaf, roughness: 0.85, envMapIntensity: 0.5 });
-  const pineMat = new THREE.MeshStandardMaterial({ map: tex.leaf, color: 0x7fa088, roughness: 0.9, envMapIntensity: 0.5 });
-  const frondMat = new THREE.MeshStandardMaterial({ map: tex.frond, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.8, envMapIntensity: 0.5 });
-  const rockMat = new THREE.MeshStandardMaterial({ map: tex.rock, color: 0xbbbbbb, roughness: 1, envMapIntensity: 0.4 });
-
-  // group everything by terrain tile so the renderer can skip tiles that are off-screen
-  const groups = new Map();
-  const push = (kind, t) => {
-    const k = Math.floor((t.x + HALF) / TILE) * 100 + Math.floor((t.z + HALF) / TILE);
-    let g = groups.get(k);
-    if (!g) groups.set(k, (g = { palms: [], broad: [], pines: [], rocks: [] }));
-    g[kind].push(t);
-  };
-  sc.palms.forEach((t) => push('palms', t));
-  sc.broad.forEach((t) => push('broad', t));
-  sc.pines.forEach((t) => push('pines', t));
-  sc.rocks.forEach((t) => push('rocks', t));
-
-  const d = new THREE.Object3D(), c = new THREE.Color();
-  const make = (geo, mat, count) => {
-    const m = new THREE.InstancedMesh(geo, mat, count);
-    m.castShadow = m.receiveShadow = !LITE;
-    return m;
-  };
-  const finish = (m) => {
-    m.instanceMatrix.needsUpdate = true;
-    if (m.instanceColor) m.instanceColor.needsUpdate = true;
-    m.computeBoundingSphere();
-    scene.add(m);
-    vegMeshes.push(m);
-  };
-
-  for (const g of groups.values()) {
-    const treeCount = g.palms.length + g.broad.length + g.pines.length;
-    const trunks = treeCount ? make(trunkGeo, trunkMat, treeCount) : null;
-    let ti = 0;
-    const setTrunk = (t, height, width, lean) => {
-      d.position.set(t.x, t.y - 0.15, t.z);
-      d.rotation.set((t.k - 0.5) * lean, t.a, Math.sin(t.a * 7) * 0.5 * lean);
-      d.scale.set(width, height, width);
-      d.updateMatrix();
-      trunks.setMatrixAt(ti++, d.matrix);
-      addCollider(t.x, t.z, 0.3 * width / 1.4 + 0.15, t.y - 3, t.y + height + 1);
-      return new THREE.Vector3(0, 1, 0).applyMatrix4(d.matrix);
-    };
-    if (g.palms.length) {
-      const m = make(palmGeo, frondMat, g.palms.length);
-      g.palms.forEach((t, i) => {
-        const h = 6 + t.s * 3.2, top = setTrunk(t, h, 1.0 + t.s * 0.3, 0.35);
-        d.position.copy(top); d.rotation.set(0, t.a * 1.7, 0); d.scale.setScalar(0.85 + t.s * 0.35); d.updateMatrix();
-        m.setMatrixAt(i, d.matrix);
-      });
-      finish(m);
-    }
-    if (g.broad.length) {
-      const m = make(broadGeo, leafMat, g.broad.length);
-      g.broad.forEach((t, i) => {
-        const h = 3.2 + t.s * 2.2, top = setTrunk(t, h, 1.2 + t.s * 0.8, 0.12), r = 1.9 + t.s * 1.5;
-        d.position.set(top.x, top.y + r * 0.55, top.z); d.rotation.set(0, t.a, 0); d.scale.set(r, r * 0.85, r); d.updateMatrix();
-        m.setMatrixAt(i, d.matrix);
-        c.setHSL(0.22 + t.k * 0.1, 0.3, 0.7 + t.s * 0.2); m.setColorAt(i, c);
-      });
-      finish(m);
-    }
-    if (g.pines.length) {
-      const m = make(pineGeo, pineMat, g.pines.length);
-      g.pines.forEach((t, i) => {
-        const h = 2.4 + t.s, s = 0.8 + t.s * 0.55;
-        setTrunk(t, h, 1.3 + t.s * 0.4, 0.05);
-        d.position.set(t.x, t.y + h * 0.55, t.z); d.rotation.set(0, t.a, 0); d.scale.setScalar(s); d.updateMatrix();
-        m.setMatrixAt(i, d.matrix);
-        c.setHSL(0.36 + t.k * 0.05, 0.25, 0.55 + t.k * 0.2); m.setColorAt(i, c);
-      });
-      finish(m);
-    }
-    if (trunks) finish(trunks);
-    if (g.rocks.length) {
-      const m = make(rockGeo, rockMat, g.rocks.length);
-      g.rocks.forEach((t, i) => {
-        d.position.set(t.x, t.y + t.s * 0.25, t.z); d.rotation.set(t.k * 3, t.a, t.k * 2);
-        d.scale.set(t.s, t.s * (0.55 + t.k * 0.3), t.s * (0.8 + t.k * 0.4)); d.updateMatrix();
-        m.setMatrixAt(i, d.matrix);
-        addCollider(t.x, t.z, t.s * 0.8, t.y - 3, t.y + t.s * 1.1);
-      });
-      finish(m);
-    }
-  }
+  const data = scatter(terrain, plan ? plan.exclusions : []);
+  if (plan) data.palms.push(...plan.palms);
+  const ground = scatterGround(terrain, plan ? plan.exclusions : []);
+  vegetation = createVegetation({ THREE, mergeGeometries, tex, scene, data, ground, lite: LITE, shadows: !LITE, addCollider, wind: windU });
 }
+
+// ======================= weather: sky, clouds, rain, wind, sound =======================
+let weatherMode = 'auto', timeOffset = 0, clouds = null, rainFx = null, lastFlash = 0;
+const audio = createAudio();
+const worldTime = () => (Date.now() + timeOffset) / 1000;
+const wx = { cover: 0, rain: 0, storm: 0, wind: 0.3, gust: 0, dir: 0.9, flash: 0 };
+let wxInit = false, wxFogColor = new THREE.Color(FOG_COLOR), wxFogNear = FOG_NEAR, wxFogFar = FOG_FAR, windOverride = null;
+const _clear = new THREE.Color(FOG_COLOR), _gray = new THREE.Color(0x8d98a3), _dark = new THREE.Color(0x4a525c);
+function updateWeather(dt, t, camPos) {
+  const tw = weatherAt(worldTime(), weatherMode), k = wxInit ? 1 - Math.exp(-dt / 1.5) : 1;
+  wxInit = true;
+  for (const key of ['cover', 'rain', 'storm', 'wind', 'gust']) wx[key] += (tw[key] - wx[key]) * k;
+  wx.dir += Math.atan2(Math.sin(tw.dir - wx.dir), Math.cos(tw.dir - wx.dir)) * k;
+  wx.flash = tw.flash;
+  if (windOverride !== null) wx.wind = windOverride;
+  windU.uTime.value = t;
+  windU.uWindV.value.set(Math.cos(wx.dir), Math.sin(wx.dir), wx.wind, wx.gust);
+  waveAmp = 1 + 0.9 * wx.wind + 0.5 * wx.storm;
+  if (waterUniforms) { waterUniforms.uAmp.value = waveAmp; waterUniforms.uRain.value = wx.rain; waterUniforms.uCover.value = wx.cover; }
+  const wetTarget = Math.min(1, wx.rain * 2.2);
+  terrainWet.value += (wetTarget - terrainWet.value) * (1 - Math.exp(-dt / (wetTarget > terrainWet.value ? 25 : 90)));
+  // light, sky and fog follow the weather
+  const dark = Math.min(1, wx.cover * 0.55 + wx.rain * 0.5 + wx.storm * 0.35);
+  sun.intensity = BASE_SUN * (1 - 0.82 * wx.cover) * (1 - 0.3 * wx.storm) + wx.flash * 9;
+  renderer.toneMappingExposure = BASE_EXPOSURE * (1 - 0.3 * wx.cover - 0.1 * wx.storm) + wx.flash * 0.7;
+  const u = sky.material.uniforms;
+  u.turbidity.value = 4 + 16 * wx.cover; u.rayleigh.value = 1.6 - 1.15 * wx.cover; u.mieCoefficient.value = 0.004 + 0.02 * wx.cover;
+  wxFogColor.copy(_clear).lerp(_gray, Math.min(1, wx.cover * 0.8 + wx.rain * 0.3)).lerp(_dark, wx.storm * 0.55);
+  if (wx.flash > 0.02) wxFogColor.lerp(_clear, Math.min(1, wx.flash));
+  wxFogNear = FOG_NEAR * (1 - 0.65 * wx.rain); wxFogFar = FOG_FAR * (1 - 0.58 * wx.rain - 0.15 * wx.cover);
+  if (clouds) clouds.update(dt, camPos, wx, [1 - 0.05 * wx.cover, 1 - 0.03 * wx.cover, 1]);
+  if (rainFx) rainFx.update(t, camPos, wx);
+  if (wx.flash > 0.6 && lastFlash <= 0.6) audio.thunder(0.8 + Math.random() * 2.6);
+  lastFlash = wx.flash;
+  return dark;
+}
+function cycleWeather() {
+  weatherMode = MODES[(MODES.indexOf(weatherMode) + 1) % MODES.length];
+  hud.toast('Weather: ' + MODE_LABEL[weatherMode] + (weatherMode === 'auto' ? ' (shared by everyone)' : ' (only you see this)'));
+}
+function toggleSound() { audio.start(); audio.setEnabled(!audio.isOn()); hud.toast(audio.isOn() ? 'Sound on' : 'Sound off'); $('btnSound').textContent = audio.isOn() ? '🔊' : '🔇'; }
 
 // ======================= avatars =======================
 function makeLabel(text) {
@@ -450,7 +371,7 @@ function moveH(dx, dz) {
     if (player.onGround && run > 0) {
       const t0 = terrain.height(ox, oz), t1 = terrain.height(nx, nz);
       if (t1 - t0 > run * 1.15 + 0.02) return false;                       // too steep
-      if (ground(nx, nz) - Math.max(ground(ox, oz), t1) > 0.5) return false; // too high a step
+      if (ground(nx, nz, player.y) - Math.max(ground(ox, oz, player.y), t1) > 0.5) return false; // too high a step
     }
   }
   // solid things block you (also while flying); if you are already inside one you may move out of it
@@ -460,7 +381,7 @@ function moveH(dx, dz) {
 }
 // Move the player to the nearest free spot (used when leaving fly mode above a building, or if stuck)
 function pushOut() {
-  const g = (x, z) => ground(x, z);
+  const g = (x, z) => ground(x, z, player.y);
   if (!blocked(player.x, player.z, PR, g(player.x, player.z))) return;
   for (let r = 1; r <= 30; r += 1) for (let k = 0; k < 24; k++) {
     const a = (k / 24) * Math.PI * 2, x = player.x + Math.cos(a) * r, z = player.z + Math.sin(a) * r, y = g(x, z);
@@ -482,7 +403,7 @@ function stopEmote() {
     // step out in front of the bench
     const f = 1.15;
     player.x += -Math.sin(player.yaw) * f; player.z += -Math.cos(player.yaw) * f;
-    player.y = ground(player.x, player.z);
+    player.y = ground(player.x, player.z, player.y);
   }
   player.sit = null; player.emote = 0; player.emoteUntil = 0;
 }
@@ -499,7 +420,7 @@ function updatePlayer(dt, now) {
   if (EMOTE_TIME[player.emote] && now > player.emoteUntil) stopEmote();
   if (player.sit) { player.vy = 0; return; }
   if (len > 1) { f /= len; s /= len; }
-  const g0 = ground(player.x, player.z);
+  const g0 = ground(player.x, player.z, player.y);
   const swimming = !player.fly && g0 < -1.0;
   const run = keys.ShiftLeft || keys.ShiftRight || touch.run;
   let speed = player.fly ? 18 : swimming ? 2.6 : run ? 7.5 : 4.2;
@@ -509,7 +430,7 @@ function updatePlayer(dt, now) {
   moveH(wx, 0);
   moveH(0, wz);
 
-  const g = ground(player.x, player.z);
+  const g = ground(player.x, player.z, player.y);
   if (player.fly) {
     const down = keys.ShiftLeft || keys.ShiftRight;
     player.vy = ((jump ? 1 : 0) - (down && !touch.run ? 1 : 0)) * 14;
@@ -533,6 +454,7 @@ function updatePlayer(dt, now) {
 // ======================= interactions =======================
 let interactables = [], nearest = null;
 const INTERACT_MSG = {
+  chess: 'Chess table: online chess is coming soon.',
   ludo: 'Ludo table: multiplayer Ludo (server-side dice and rules) is the next feature.',
   fish: 'Fishing spot: fishing is coming soon.',
   shop: null,
@@ -542,17 +464,74 @@ function updateInteraction() {
   let best = null, bd = 1e9;
   for (const it of interactables) {
     const d = Math.hypot(it.x - player.x, it.z - player.z);
-    if (d < it.radius && Math.abs(player.y - it.y) < 3 && d < bd) { best = it; bd = d; }
+    if (d < it.radius && Math.abs(player.y - it.y) < (it.dy || 3)) {
+      let score = d;
+      if (it.type === 'door' && d > 0.01) { // in a corridor, prefer the door you are looking at
+        const dot = (-Math.sin(player.yaw) * (it.x - player.x) + -Math.cos(player.yaw) * (it.z - player.z)) / d;
+        if (dot < 0.25) score += 1.5;
+      }
+      if (score < bd) { best = it; bd = score; }
+    }
   }
   nearest = best;
-  hud.setPrompt(best ? best.label : null, best && best.soon);
+  hud.setPrompt(best ? (best.labels ? best.labels[doorOpen.get(best.door) ? 1 : 0] : best.label) : null, best && best.soon);
 }
 function interact() {
   if (player.sit && player.sit.bench) { stopEmote(); return; }
   if (!nearest) return;
   if (nearest.type === 'sit') sitOn(nearest);
+  else if (nearest.type === 'door') setDoorOpen(nearest.door, !doorOpen.get(nearest.door), true);
+  else if (nearest.type === 'npc') { const n = npcs.find((q) => q.id === nearest.npc); if (n) { n.waveUntil = performance.now() + 2500; hud.toast(n.name.split(' · ')[0] + ': ' + n.lines[n.line++ % n.lines.length], 5600); } }
   else hud.toast(INTERACT_MSG[nearest.type] || `${nearest.label}: coming soon`);
 }
+
+// ======================= hotel: doors, receptionist, indoors =======================
+function setDoorOpen(id, open, send) {
+  doorOpen.set(id, open);
+  const bx = doorBoxes.get(id);
+  if (bx) bx.forEach((e) => { e.off = open; });
+  if (town) town.setDoor(id, open);
+  if (send && socket && socket.connected) socket.emit('door', { id, open });
+}
+// Staff NPCs: the hotel receptionist plus the café, shop, rentals and games-hall hosts. They wave when you walk up and turn to face you.
+const npcs = [];
+const RECEPTION_CFG = { g: 1, skin: 2, hs: 5, hc: 1, face: 1, top: 1, tc: 11, bot: 0, bc: 2, shoe: 1, acc: [0, 0, 0, 0, 0] };
+const NPC_LINES = [
+  "Welcome to the Island Hotel! I'm the receptionist.",
+  'The guest rooms are on floors 1 and 2. Take the stairs at the back of the lobby.',
+  'Press E at a door to open it. Every room has its own bathroom.',
+  'Rooms have a bed, wardrobe, desk, TV and a bathroom with a shower. Make yourself at home!',
+  'The pier and the beach are just outside. Enjoy your stay!',
+];
+function buildNpcs() {
+  const h = plan.hotel.npc;
+  const defs = [{ id: 'maya', name: 'Maya · Receptionist', cfg: RECEPTION_CFG, lx: h.lx, lz: h.lz, y: h.y, faceZ: 1, lines: NPC_LINES }, ...plan.extra.npcs];
+  for (const d of defs) {
+    const p = plan.toW(d.lx, d.lz), av = makeAvatar(d.cfg, d.name, true);
+    const baseYaw = plan.theta + (d.faceZ > 0 ? Math.PI : 0);
+    av.group.position.set(p.x, d.y, p.z); av.group.rotation.y = baseYaw;
+    scene.add(av.group);
+    if (d.id === 'maya') addCollider(p.x, p.z, 0.32, d.y, d.y + 1.9);   // (the others got their collider from the plan)
+    npcs.push({ id: d.id, name: d.name, av, x: p.x, z: p.z, y: d.y, baseYaw, near: false, waveUntil: 0, lines: d.lines, line: 0 });
+  }
+}
+function updateNpcs(dt, t, now) {
+  for (const n of npcs) {
+    const dx = player.x - n.x, dz = player.z - n.z, near = Math.abs(player.y - n.y) < 2.5 && Math.hypot(dx, dz) < 6.5;
+    if (near && !n.near) n.waveUntil = now + 3200;   // waves when you walk up
+    n.near = near;
+    const g = n.av.group;
+    g.rotation.y = lerpAngle(g.rotation.y, near ? Math.atan2(-dx, -dz) : n.baseYaw, 1 - Math.exp(-dt * 5));
+    animateAvatar(n.av, { moved: 0, dt, emote: now < n.waveUntil ? 1 : 0, t });
+  }
+}
+// inside a building (no rain, quieter wind)?
+function isIndoors(x, z, y) {
+  if (!plan) return false;
+  const l = plan.toLocal(x, z);
+  return plan.indoorBounds.some((b) => l.lx > b.x0 && l.lx < b.x1 && l.lz > b.z0 && l.lz < b.z1 && y > b.y0 && y < b.y1);
+}
+let indoors = false;
 
 // ======================= other players =======================
 const others = new Map();
@@ -598,6 +577,16 @@ function updateOthers(dt, t) {
 // ======================= HUD + chat =======================
 const overlay = $('overlay'), playBtn = $('play'), statusEl = $('status');
 let socket = null, locked = false;
+const voice = createVoice({
+  getSocket: () => socket,
+  getSelf: () => ({ x: player.x, y: player.y + 1.6, z: player.z, yaw: player.yaw, pitch: player.pitch }),
+  getOthers: () => [...others].map(([id, o]) => ({ id, name: o.name, seen: o.seen, x: o.group.position.x, y: o.group.position.y + 1.6, z: o.group.position.z })),
+  isIndoors,
+  getAudioContext: () => { audio.start(); return audio.getContext(); },
+  onSpeakers: (list, selfSpeaking) => hud.setSpeakers(list, selfSpeaking, (id) => voice.toggleMute(id)),
+  onMic: (on) => hud.setMic(on),
+  toast: (m) => hud.toast(m, 3600),
+});
 const hud = createHUD({
   isTouch,
   onEmote: (id) => { if (active()) setEmote(id); },
@@ -625,6 +614,12 @@ const customizer = createCustomizer({
 $('btnCustom').addEventListener('click', () => { if (ready || overlay.style.display !== 'none') customizer.open(); });
 $('btnCustom').addEventListener('touchstart', (e) => { e.preventDefault(); customizer.open(); }, { passive: false });
 $('playCustom').addEventListener('click', () => customizer.open());
+$('btnSound').addEventListener('click', toggleSound);
+$('btnMic').addEventListener('click', () => voice.toggleMic());
+$('btnMic').addEventListener('touchstart', (e) => { e.preventDefault(); voice.start(); voice.toggleMic(); }, { passive: false });
+$('btnSound').addEventListener('touchstart', (e) => { e.preventDefault(); toggleSound(); }, { passive: false });
+$('btnSound').textContent = audio.isOn() ? '🔊' : '🔇';
+$('wx').addEventListener('click', cycleWeather);
 function openChat() {
   for (const k in keys) keys[k] = false;
   hud.chat.open();
@@ -646,6 +641,7 @@ const toggleView = () => { thirdPerson = !thirdPerson; };
 playBtn.addEventListener('click', () => {
   if (!ready) return;
   overlay.style.display = 'none';
+  audio.start(); voice.start();
   if (!isTouch) renderer.domElement.requestPointerLock();
 });
 document.addEventListener('pointerlockchange', () => {
@@ -662,6 +658,10 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyE') interact();
   if (e.code === 'KeyM') hud.toggleMap();
   if (e.code === 'KeyC') customizer.open();
+  if (e.code === 'KeyK') cycleWeather();
+  if (e.code === 'KeyO') toggleSound();
+  if (e.code === 'KeyG') voice.toggleMic();
+  audio.start();
   if (e.code === 'Space') e.preventDefault();
   const m = /^Digit([1-9])$/.exec(e.code);
   if (m) setEmote(+m[1]);
@@ -740,8 +740,13 @@ function connect() {
     statusEl.textContent = 'Disconnected. Reconnecting...';
     document.exitPointerLock?.();
   });
-  socket.on('init', ({ players, selfId }) => {
+  socket.on('door', ({ id, open }) => setDoorOpen(id, !!open, false));
+  socket.on('rtc', (m) => voice.handleSignal(m));
+  socket.on('init', ({ players, selfId, serverTime, doors }) => {
+    if (serverTime) timeOffset = serverTime - Date.now();
+    for (const id of doorBoxes.keys()) setDoorOpen(id, !!(doors && doors[id]), false);
     for (const id of [...others.keys()]) removeOther(id);
+    voice.setSelf(selfId);
     if (!spawned) { spawn(); spawned = true; }
     rebuildSelf();
     for (const p of Object.values(players)) if (p.id !== selfId) addOther(p);
@@ -753,7 +758,7 @@ function connect() {
     if (!hadSavedAvatar && !autoOpened) { autoOpened = true; customizer.open(); }
   });
   socket.on('playerJoined', (p) => { addOther(p); hud.addChat(null, `${p.name} joined`); });
-  socket.on('playerLeft', (id) => { const o = others.get(id); if (o) hud.addChat(null, `${o.name} left`); removeOther(id); });
+  socket.on('playerLeft', (id) => { voice.removePeer(id); const o = others.get(id); if (o) hud.addChat(null, `${o.name} left`); removeOther(id); });
   socket.on('playerMoved', ({ id, x, y, z, ry, em }) => {
     const o = others.get(id);
     if (!o) return;
@@ -789,12 +794,14 @@ function frame(now) {
     if (active()) { updatePlayer(dt, now); updateInteraction(); } else if (!hud.isChatOpen()) hud.setPrompt(null);
     sendPosition(now, false);
     updateOthers(dt, t);
+    indoors = isIndoors(player.x, player.z, player.y);
+    updateNpcs(dt, t, now);
     hud.setActiveEmote(player.emote);
     if (selfAvatar) {
       selfAvatar.group.position.set(player.x, player.y, player.z);
       selfAvatar.group.rotation.y = player.yaw;
-      selfAvatar.group.visible = thirdPerson;
-      const swimSelf = !player.fly && !player.sit && ground(player.x, player.z) < -1.0;
+      selfAvatar.group.visible = thirdPerson && !indoors;
+      const swimSelf = !player.fly && !player.sit && ground(player.x, player.z, player.y) < -1.0;
       animateAvatar(selfAvatar, {
         moved: Math.hypot(player.x - px, player.z - pz), dt, emote: player.emote, t, swim: swimSelf,
         air: !player.onGround && !player.fly && !swimSelf && !player.sit, sitKind: player.sit && player.sit.bench ? 'bench' : 'ground',
@@ -805,22 +812,20 @@ function frame(now) {
     _eye.set(player.x, player.y + 1.62 - eyeDrop, player.z);
     camera.rotation.set(player.pitch, player.yaw, 0);
     camera.position.copy(_eye);
-    if (thirdPerson) {
+    if (thirdPerson && !indoors) { // (rooms are too small for the follow camera: you see through your own eyes indoors)
       _dir.set(-Math.sin(player.yaw) * Math.cos(player.pitch), Math.sin(player.pitch), -Math.cos(player.yaw) * Math.cos(player.pitch));
       camera.position.addScaledVector(_dir, -4.2);
       camera.position.y += 0.5;
-      camera.position.y = Math.max(camera.position.y, ground(camera.position.x, camera.position.z) + 0.4);
+      camera.position.y = Math.max(camera.position.y, ground(camera.position.x, camera.position.z, camera.position.y) + 0.4);
     }
-    // underwater look
+    // weather first, then the underwater look overrides the fog
+    updateWeather(dt, t, camera.position);
     const uw = camera.position.y < 0.15 + Math.sin(now * 0.001) * 0.3 && camera.position.y < 0.45;
-    if (uw !== underwater) {
-      underwater = uw;
-      sky.visible = !uw;
-      renderer.setClearColor(UNDER_COLOR);
-      scene.fog.color.set(uw ? UNDER_COLOR : FOG_COLOR);
-      scene.fog.near = uw ? 1 : FOG_NEAR;
-      scene.fog.far = uw ? 55 : FOG_FAR;
-    }
+    if (uw !== underwater) { underwater = uw; sky.visible = !uw; renderer.setClearColor(UNDER_COLOR); }
+    if (clouds) clouds.group.visible = !uw;
+    if (rainFx && (uw || indoors)) rainFx.object.visible = false;
+    if (uw) { scene.fog.color.set(UNDER_COLOR); scene.fog.near = 1; scene.fog.far = 55; }
+    else { scene.fog.color.copy(wxFogColor); scene.fog.near = wxFogNear; scene.fog.far = wxFogFar; }
     // light, sky and water follow the player
     const tx = Math.round(player.x / 4) * 4, ty = Math.round(player.y / 4) * 4, tz = Math.round(player.z / 4) * 4;
     sun.target.position.set(tx, ty, tz);
@@ -829,12 +834,18 @@ function frame(now) {
     water.position.x = Math.round(camera.position.x / WATER_CELL) * WATER_CELL;
     water.position.z = Math.round(camera.position.z / WATER_CELL) * WATER_CELL;
     farOcean.position.x = camera.position.x; farOcean.position.z = camera.position.z;
-    if (frameNo % 8 === 1) cullVegetation(player.x, player.z);
+    if (vegetation && frameNo % 8 === 1) vegetation.update(player.x, player.z);
+    if (frameNo % 6 === 3) {
+      const h = ground(player.x, player.z, player.y);
+      audio.update({ indoors, wind: wx.wind, gust: wx.gust, rain: wx.rain, storm: wx.storm, cover: wx.cover, water: Math.max(0, Math.min(1, 1 - (h - 0.3) / 7)), forest: Math.max(0, Math.min(1, (h - 2) / 6)) * (h < 38 ? 1 : 0), underwater });
+    }
+    if (frameNo % 30 === 11) $('wx').textContent = describe(wx);
     if (frameNo % 30 === 7 && !player.fly && !player.sit) pushOut();
     if (!isTouch || frameNo % 2 === 0) hud.drawMinimap(player, [...others.values()].filter((o) => o.seen).map((o) => ({ x: o.group.position.x, z: o.group.position.z })));
   }
   if (town) town.update(t, waveHeight);
   if (waterUniforms) waterUniforms.uTime.value = t;
+  if (!ready) updateWeather(dt, t, camera.position);
   renderer.render(scene, camera);
 }
 
@@ -849,16 +860,20 @@ async function boot() {
   buildTerrain(); buildWater();
   statusEl.textContent = 'Planting trees...'; await nextFrame();
   buildVegetation();
+  clouds = createClouds(THREE, { puff: tex.puff, noise: tex.noise, count: LITE ? 26 : 46 }); scene.add(clouds.group);
+  rainFx = createRain(THREE, { count: LITE ? 3200 : 7500 }); scene.add(rainFx.object);
   statusEl.textContent = 'Building the beach town...'; await nextFrame();
   tex.signs = {
     rentals: signTexture('RENTALS', '#d9644a', '#ffffff'), cafe: signTexture('CAFE', '#6e4527', '#fff4d6'),
-    games: signTexture('PLAY', '#14101f', '#ff7bec', true), shop: signTexture('SHOP', '#1d6fd8', '#ffffff'), hotel: signTexture('HOTEL', '#274c77', '#ffe9a8'),
+    reception: signTexture('RECEPTION', '#3b2a20', '#f2d9a0'), cafe_menu: signTexture('MENU', '#232a2e', '#fff4d6'), rentals_prices: signTexture('SURF · SUP · KAYAK', '#0f5f7a', '#ffffff'), scoreboard: signTexture('LUDO · CHESS', '#1a1428', '#ff7bec', true), games: signTexture('PLAY', '#14101f', '#ff7bec', true), shop: signTexture('SHOP', '#1d6fd8', '#ffffff'), hotel: signTexture('HOTEL', '#274c77', '#ffe9a8'),
   };
   tex.ludo = ludoBoardTexture(Math.min(8, renderer.capabilities.getMaxAnisotropy()));
   tex.lighthouse = lighthouseTexture(4);
+  tex.chess = chessBoardTexture(Math.min(8, renderer.capabilities.getMaxAnisotropy()));
   town = buildTown({ THREE, mergeGeometries }, plan, tex, { shadows: !LITE });
   scene.add(town.group);
   plan.boxes.forEach(addBoxCollider);
+  buildNpcs();
   plan.circles.forEach((c) => addCollider(c.x, c.z, c.r, c.y0, c.y1));
   interactables = plan.interactables;
   hud.initMinimap(terrain, plan.landmarks);
@@ -870,6 +885,6 @@ async function boot() {
   statusEl.textContent = 'Connecting to server...'; await nextFrame();
   connect();
 }
-window.__vw = { scene, camera, renderer, player, keys, hud, get terrain() { return terrain; }, get plan() { return plan; }, ground, blocked, setEmote, interact, get nearest() { return nearest; } };
+window.__vw = { scene, camera, renderer, player, keys, hud, voice, setDoorOpen, doorOpen, get indoors() { return indoors; }, npcs, wx, setWeather: (m) => { weatherMode = m; wxInit = false; }, setWind: (v) => { windOverride = v; }, get vegetation() { return vegetation; }, get terrain() { return terrain; }, get plan() { return plan; }, ground, blocked, setEmote, interact, get nearest() { return nearest; } };
 requestAnimationFrame(frame);
 boot().catch((e) => { statusEl.textContent = 'Error: ' + e.message; console.error(e); });

@@ -16,6 +16,7 @@ export function buildTown(deps, plan, tex, opts = {}) {
     stone: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, envMapIntensity: 0.3 }),
     glass: new THREE.MeshStandardMaterial({ vertexColors: true, color: 0x9bbbd4, roughness: 0.06, metalness: 0.35, envMapIntensity: 1.4 }),
     glow: new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false }),
+    clear: new THREE.MeshStandardMaterial({ vertexColors: true, color: 0xb9d7ea, transparent: true, opacity: 0.3, roughness: 0.05, metalness: 0.2, depthWrite: false, envMapIntensity: 1.4 }),
   };
 
   // ---------- batching helpers ----------
@@ -65,11 +66,38 @@ export function buildTown(deps, plan, tex, opts = {}) {
 
   // ---------- houses ----------
   const signs = [];
+  // the parts of a hollow building that are drawn the same way as before: awning, chimney and sign
+  const addAwningEtc = (b, x, z, fz, y0, w, d, h, rh) => {
+    if (b.awning) {
+      const n = Math.max(4, Math.round((w - 1.5) / 0.9)), ws = (w - 1.5) / n;
+      for (let i = 0; i < n; i++) add('plain', box(ws, 0.07, 1.8), { x: x - (w - 1.5) / 2 + ws * (i + 0.5), y: y0 + 3.0, z: fz + 0.9, rx: 0.28 }, b.awning[i % 2]);
+    }
+    if (b.chimney) add('stone', box(0.9, 2, 0.9, 1.5), { x: x + w / 4, y: y0 + h + rh * 0.55, z: z - d / 4 }, 0x9c5b45);
+    signs.push({ b, x, y: y0 + 3.4, z: fz + 0.09 });
+  };
   const addHouse = (b) => {
     const y0 = deckY, { x, z, w, d, h } = b, fz = z + d / 2;
     add('stone', box(w + 0.5, 2.2, d + 0.5, 2), { x, y: y0 - 1.13, z }, 0xb9b3a6);
-    add('wall', box(w, h, d, 2.4), { x, y: y0 + h / 2, z }, b.wall);
-    add('plain', box(w + 0.14, 0.35, d + 0.14), { x, y: y0 + 0.175, z }, 0xf5f1e8);          // base trim
+    if (b.id === 'hotel') {
+      const rhh = b.rh || 3;
+      add('roof', roofGeo(w, d, rhh), { x, y: y0 + h - 0.1, z }, b.roof);
+      for (const sx of [-1, 1]) {
+        const px = x + sx * (w / 2), top = y0 + h - 0.1 + rhh;
+        const pts = sx > 0 ? [[px, y0 + h, z + d / 2], [px, y0 + h, z - d / 2], [px, top, z]] : [[px, y0 + h, z - d / 2], [px, y0 + h, z + d / 2], [px, top, z]];
+        add('wall', tri(...pts), {}, b.wall);
+      }
+      add('plain', box(w + 0.14, 0.22, d + 0.14), { x, y: y0 + h - 0.11, z }, 0xf5f1e8);
+      signs.push({ b, x, y: y0 + 3.75, z: fz + 0.09 });
+      return;
+    }
+    const hollow = ['rentals', 'cafe', 'games', 'shop'].includes(b.id);   // these have real interiors (walls come from the plan)
+    if (!hollow) {
+      add('wall', box(w, h, d, 2.4), { x, y: y0 + h / 2, z }, b.wall);
+      add('plain', box(w + 0.14, 0.35, d + 0.14), { x, y: y0 + 0.175, z }, 0xf5f1e8);          // base trim
+    } else {
+      for (const sz of [-1, 1]) add('plain', box(w + 0.14, 0.35, 0.14), { x, y: y0 + 0.175, z: z + sz * (d / 2 + 0.05) }, 0xf5f1e8);
+      for (const sx of [-1, 1]) add('plain', box(0.14, 0.35, d + 0.14), { x: x + sx * (w / 2 + 0.05), y: y0 + 0.175, z }, 0xf5f1e8);
+    }
     add('plain', box(w + 0.14, 0.22, d + 0.14), { x, y: y0 + h - 0.11, z }, 0xf5f1e8);         // eave trim
     const rh = 0.28 * d + 0.3;
     add('roof', roofGeo(w, d, rh), { x, y: y0 + h - 0.1, z }, b.roof);
@@ -79,6 +107,7 @@ export function buildTown(deps, plan, tex, opts = {}) {
       const pts = sx > 0 ? [[px, y0 + h, z + d / 2], [px, y0 + h, z - d / 2], [px, top, z]] : [[px, y0 + h, z - d / 2], [px, y0 + h, z + d / 2], [px, top, z]];
       add('wall', tri(...pts), {}, b.wall);
     }
+    if (hollow) { addAwningEtc(b, x, z, fz, y0, w, d, h, rh); return; }
     // door
     const dw = b.neon ? 2.6 : 1.2;
     add('plain', box(dw + 0.35, 2.5, 0.1), { x, y: y0 + 1.25, z: fz + 0.02 }, 0xf5f1e8);
@@ -174,6 +203,14 @@ export function buildTown(deps, plan, tex, opts = {}) {
   add('plain', cyl(0.7, 0.8, 0.1, 16), { x: L.x, y: L.y + 0.05, z: L.z }, 0x5a3a24);
   [[0, -1.95], [1.95, 0], [0, 1.95], [-1.95, 0]].forEach(([dx, dz], i) => add('plain', cyl(0.3, 0.26, 0.45, 12), { x: L.x + dx, y: L.y + 0.225, z: L.z + dz }, seatCols[i]));
 
+  // ---------- hotel interior ----------
+  const H = plan.hotel;
+  for (const p of H.parts) add(p.mat, box(p.w, p.h, p.d, p.mat === 'wall' ? 2.4 : p.mat === 'wood' ? 3 : 1), { x: p.lx, y: p.y, z: p.lz }, p.color);
+  for (const l of H.lamps) add('glow', box(0.5, 0.04, 0.5, 1), { x: l.lx, y: l.y, z: l.lz }, 0xfff3c4);
+  const X = plan.extra;
+  for (const p of X.parts) add(p.mat, box(p.w, p.h, p.d, p.mat === 'wall' ? 2.4 : p.mat === 'wood' ? 3 : 1), { x: p.lx, y: p.y, z: p.lz }, p.color);
+  for (const l of X.lamps) add('glow', box(0.5, 0.04, 0.5, 1), { x: l.lx, y: l.y, z: l.lz }, 0xfff3c4);
+
   // ---------- merge everything into few meshes ----------
   for (const [key, list] of lists) {
     const mesh = new THREE.Mesh(mergeGeometries(list, false), M[key]);
@@ -252,7 +289,44 @@ export function buildTown(deps, plan, tex, opts = {}) {
     group.add(g);
   });
 
+  // ---------- hotel signs + animated doors ----------
+  [...H.signs, ...X.signs].forEach((s) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(s.w, s.h), new THREE.MeshBasicMaterial({ map: tex.signs && tex.signs[s.name], toneMapped: false }));
+    m.position.set(s.lx, s.y, s.lz + 0.03); group.add(m);
+  });
+  // Ludo and chess table tops inside the games hall
+  X.tops.forEach((tp) => {
+    const side = new THREE.MeshStandardMaterial({ color: 0x5a3a24, roughness: 0.8 });
+    const top = new THREE.MeshStandardMaterial({ map: tp.kind === 'chess' ? tex.chess : tex.ludo, roughness: 0.55, envMapIntensity: 0.4 });
+    const m = new THREE.Mesh(new THREE.BoxGeometry(tp.size, 0.08, tp.size), [side, side, top, side, side, side]);
+    m.position.set(tp.lx, tp.y - 0.04, tp.lz); m.castShadow = m.receiveShadow = shadows; group.add(m);
+  });
+  const doorGroups = new Map();
+  const brass = new THREE.MeshStandardMaterial({ color: 0xd9b44a, metalness: 0.8, roughness: 0.3 });
+  const doorGlass = new THREE.MeshStandardMaterial({ color: 0xbfe0f0, transparent: true, opacity: 0.38, roughness: 0.08, metalness: 0.2, depthWrite: false });
+  for (const d of [...H.doors, ...X.doors]) {
+    const g = new THREE.Group(); g.position.set(d.lx, d.y, d.lz);
+    const alongX = Math.abs(d.dx) > 0.5, geo = new THREE.BoxGeometry(alongX ? d.len : 0.05, d.h, alongX ? 0.05 : d.len).translate(d.dx * d.len / 2, d.h / 2, d.dz * d.len / 2);
+    const m = new THREE.Mesh(geo, d.glass ? doorGlass : new THREE.MeshStandardMaterial({ color: d.color, map: tex.planks, roughness: 0.75 }));
+    m.castShadow = shadows; g.add(m);
+    const hnd = new THREE.Mesh(new THREE.BoxGeometry(alongX ? 0.14 : 0.1, 0.05, alongX ? 0.1 : 0.14), brass);
+    hnd.position.set(d.dx * (d.len - 0.14), 1.0, d.dz * (d.len - 0.14)); g.add(hnd);
+    if (d.glass) { const bar = new THREE.Mesh(new THREE.BoxGeometry(alongX ? d.len : 0.07, 0.06, alongX ? 0.07 : d.len).translate(d.dx * d.len / 2, 1.0, d.dz * d.len / 2), new THREE.MeshStandardMaterial({ color: 0xf5f1e8 })); g.add(bar); }
+    group.add(g);
+    let o = doorGroups.get(d.group);
+    if (!o) doorGroups.set(d.group, (o = { leaves: [], cur: 0, target: 0 }));
+    o.leaves.push({ g, open: d.open });
+  }
+  let lastT = 0;
+  const setDoor = (id, open, instant = false) => { const o = doorGroups.get(id); if (!o) return; o.target = open ? 1 : 0; if (instant) { o.cur = o.target; o.leaves.forEach((l) => (l.g.rotation.y = o.cur * l.open)); } };
+
   const update = (t, wave) => {
+    const dt = Math.min(0.1, Math.max(0, t - lastT)); lastT = t;
+    for (const o of doorGroups.values()) {
+      if (o.cur === o.target) continue;
+      o.cur += (o.target - o.cur) * (1 - Math.exp(-dt * 7)); if (Math.abs(o.target - o.cur) < 0.005) o.cur = o.target;
+      for (const l of o.leaves) l.g.rotation.y = o.cur * l.open;
+    }
     for (const b of boats) {
       const y = wave(b.wx, b.wz, t);
       b.obj.position.y = 0.42 + y * 0.92;
@@ -260,5 +334,5 @@ export function buildTown(deps, plan, tex, opts = {}) {
       b.obj.rotation.x = Math.sin(t * 1.15 + b.phase) * 0.02;
     }
   };
-  return { group, update };
+  return { group, update, setDoor };
 }

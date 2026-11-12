@@ -20,6 +20,7 @@ function tfbm(u, v, base, oct, s) {
   for (let i = 0; i < oct; i++) { sum += tnoise(u, v, p, s + i * 13) * a; norm += a; a *= 0.5; p *= 2; }
   return sum / norm;
 }
+export { tfbm, pixelTexture };
 const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
 function pixelTexture(size, fn, srgb, aniso) {
@@ -115,6 +116,14 @@ export function ludoBoardTexture(aniso = 4) {
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = aniso;
   return t;
+}
+export function chessBoardTexture(aniso = 4) {
+  const c = document.createElement('canvas'); c.width = c.height = 512;
+  const g = c.getContext('2d'), s = 440 / 8, o = 36;
+  g.fillStyle = '#5a3a24'; g.fillRect(0, 0, 512, 512);
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) { g.fillStyle = (x + y) % 2 ? '#7a4a2a' : '#f0d9b5'; g.fillRect(o + x * s, o + y * s, s, s); }
+  g.strokeStyle = '#2b1a10'; g.lineWidth = 4; g.strokeRect(o, o, 440, 440);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = aniso; return t;
 }
 export function lighthouseTexture(aniso = 4) {
   const c = document.createElement('canvas'); c.width = 64; c.height = 256;
