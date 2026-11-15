@@ -180,6 +180,7 @@ export function buildCity({ THREE, mergeGeometries }, plan, tex, opts = {}) {
     gold: std({ vertexColors: true, metalness: 0.65, roughness: 0.35, envMapIntensity: 1.2 }),
     lamp: new THREE.MeshStandardMaterial({ color: 0xfff1c0, emissive: 0xffe29a, emissiveIntensity: 1.6 }),
   };
+  M.stone.emissive.setHex(0xff8f3c); M.stone.emissiveMap = M.stone.map; M.stone.emissiveIntensity = 0;   // temples glow warmly at night, carving still visible
   const add = (mesh) => { if (mesh) group.add(mesh); return mesh; };
 
   // ----- ground -----
@@ -281,6 +282,7 @@ export function buildCity({ THREE, mergeGeometries }, plan, tex, opts = {}) {
     fur.box(s.x, s.z, 2.5, 3.8, 0.16, 2.5, sy, parseInt(s.color.slice(1), 16), { us: 2, vs: 2 });
     for (let k = -1; k <= 1; k++) { const q = P(k * 0.9, 0); fur.box(q[0], q[1], 1.0, 0.55, 0.25, 0.55, sy, [0xe8b04a, 0xf2e6c8, 0xc86a3a][k + 1], { us: 2, vs: 2 }); }
     signs.push({ x: P(0, 1.25)[0], z: P(0, 1.25)[1], y: 2.1, yaw: sy, text: s.label, color: s.color });
+    for (const k of [-1, 0, 1]) { const q = P(k * 1.1, 0.95); lampHeads.box(q[0], q[1], 2.28, 0.26, 0.2, 0.26, sy, 0xffffff, { us: 2, vs: 2 }); }   // bulbs under the awning
   }
   for (const a of plan.autos) {
     const c = Math.cos(a.yaw), sn = Math.sin(a.yaw), P = (lx, lz) => [a.x + lx * c + lz * sn, a.z - lx * sn + lz * c];
@@ -299,6 +301,7 @@ export function buildCity({ THREE, mergeGeometries }, plan, tex, opts = {}) {
       fur.box(t.x, t.z, 0, 1.8, 0.75, 1.8, 0, 0x8b6a45, { us: 2, vs: 2 });
       for (const [dx, dz] of [[-1.5, 0], [1.5, 0], [0, -1.5], [0, 1.5]]) fur.box(t.x + dx, t.z + dz, 0, 0.5, 0.42, 0.5, 0, 0xc86a3a, { us: 2, vs: 2 });
     });
+    for (const dx of [-7, 0, 7]) lampHeads.box(ch.x + dx, ch.z - 0.5, 2.95, 0.34, 0.22, 0.34, 0, 0xffffff, { us: 2, vs: 2 });   // bulbs under the tin roof
     signs.push({ x: ch.x, z: ch.z - 4.6, y: 3.9, yaw: 0, text: 'CHAI ADDA', color: '#6e4527', w: 5, flip: true });
   }
   add(fur.mesh(M.plain, shadows)); add(lampHeads.mesh(M.lamp, false));
@@ -345,7 +348,7 @@ export function buildCity({ THREE, mergeGeometries }, plan, tex, opts = {}) {
   }
 
   return {
-    group, mapCanvas, setDoor() {},
+    group, mapCanvas, setDoor() {}, mats: { lamp: M.lamp, stone: M.stone },
     update(t) { const nm = group.userData.waterNormal; if (nm) nm.offset.set(t * 0.012, t * 0.007); },
   };
 }

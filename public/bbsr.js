@@ -2,7 +2,10 @@ import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { io } from '/socket.io/socket.io.esm.min.js';
-import { buildPlan, WORLD, EDGE, lakeValue } from './bbsr_plan.js';
+import { buildPlan, WORLD, EDGE, lakeValue, COMPOUND, LAKE, MAHAKALA } from './bbsr_plan.js';
+import { hourAt, clockText, skyAt } from './bbsr_time.js';
+import { createNightSky, collectLights, createLightGlow, createBeacon } from './bbsr_night.js';
+import { createMissions, spotsFromPlan, ITEMS, SPOT_LABELS, QUEST_LIST, isNight } from './bbsr_missions.js';
 import { buildCity } from './bbsr_mesh.js';
 import { makeCityTextures } from './bbsr_tex.js';
 import { makeTextures } from './textures.js';
@@ -66,6 +69,13 @@ scene.add(sky);
 }
 const sun = new THREE.DirectionalLight(0xfff0d6, 3.0);
 scene.add(sun, sun.target);
+const moon = new THREE.DirectionalLight(0x9fb4ff, 0);       // moonlight: no shadows, just a cool wash from above
+moon.target = sun.target; scene.add(moon);
+const nightFill = new THREE.HemisphereLight(0x5b73c0, 0x1b1f30, 0);
+scene.add(nightFill);
+const nightSky = createNightSky(THREE); scene.add(nightSky.group);
+const beacon = createBeacon(THREE); scene.add(beacon.group);
+let glow = null;
 if (!LITE) {
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -145,6 +155,35 @@ function buildVegetation() {
   vegetation = createVegetation({ THREE, mergeGeometries, tex, scene, data, ground, lite: LITE, shadows: !LITE, addCollider, wind: windU });
 }
 
+// ======================= time of day =======================
+// One shared clock (30 real minutes per day, same for everyone). T lets you look at another time, just for you.
+let todOverride = null, todStep = 0, curHour = 9, ts = skyAt(9), lastEnv = -1, envMats = [], envSeen = new Set();
+const TOD_STEPS = [null, 6.3, 12, 17.4, 21], TOD_NAMES = ['Live clock (shared)', 'Dawn', 'Noon', 'Evening', 'Night'];
+function cycleTime() {
+  todStep = (todStep + 1) % TOD_STEPS.length; todOverride = TOD_STEPS[todStep];
+  hud.toast('Time of day: ' + TOD_NAMES[todStep] + (todOverride === null ? '' : ' (only you see this)'));
+}
+const _warm = new THREE.Color(0xff8a3d), _white = new THREE.Color(0xfff0d6), _dusk = new THREE.Color(0xe9a574), _nightFog = new THREE.Color(0x0a1022);
+function collectEnvMats() {
+  scene.traverse((o) => {
+    const ms = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
+    for (const m of ms) if (m.isMeshStandardMaterial && !envSeen.has(m)) { envSeen.add(m); m.userData.envBase = m.envMapIntensity === undefined ? 1 : m.envMapIntensity; envMats.push(m); lastEnv = -1; }
+  });
+}
+function applyTime(camPos, t, cover) {
+  curHour = todOverride !== null ? todOverride : hourAt(worldTime());
+  ts = skyAt(curHour);
+  sunDir.set(ts.dir[0], ts.dir[1], ts.dir[2]);
+  sky.material.uniforms.sunPosition.value.copy(sunDir);
+  sun.color.copy(_white).lerp(_warm, Math.min(1, ts.glow * 0.9));
+  moon.intensity = 0.7 * ts.night * (1 - 0.7 * cover);
+  nightFill.intensity = 0.9 * ts.night * (1 - 0.5 * cover);
+  if (Math.abs(ts.env - lastEnv) > 0.003) { for (const m of envMats) m.envMapIntensity = m.userData.envBase * ts.env; lastEnv = ts.env; }
+  if (town && town.mats) { town.mats.lamp.emissiveIntensity = 0.12 + 3.4 * ts.lampOn; town.mats.stone.emissiveIntensity = 0.5 * ts.lampOn; }
+  nightSky.update(camPos, ts, cover);
+  if (glow) glow.update(camPos, ts.lampOn, cover, t, frameNo % 8 === 0);
+}
+
 // ======================= weather: sky, clouds, rain, wind, sound =======================
 let weatherMode = 'auto', timeOffset = 0, clouds = null, rainFx = null, lastFlash = 0;
 const audio = createAudio();
@@ -167,14 +206,19 @@ function updateWeather(dt, t, camPos) {
   terrainWet.value += (wetTarget - terrainWet.value) * (1 - Math.exp(-dt / (wetTarget > terrainWet.value ? 25 : 90)));
   // light, sky and fog follow the weather
   const dark = Math.min(1, wx.cover * 0.55 + wx.rain * 0.5 + wx.storm * 0.35);
-  sun.intensity = BASE_SUN * (1 - 0.82 * wx.cover) * (1 - 0.3 * wx.storm) + wx.flash * 9;
-  renderer.toneMappingExposure = BASE_EXPOSURE * (1 - 0.3 * wx.cover - 0.1 * wx.storm) + wx.flash * 0.7;
+  applyTime(camPos, t, wx.cover);
+  sun.intensity = BASE_SUN * ts.sunI * (1 - 0.82 * wx.cover) * (1 - 0.3 * wx.storm) + wx.flash * 9;
+  renderer.toneMappingExposure = BASE_EXPOSURE * ts.exposure * (1 - 0.3 * wx.cover - 0.1 * wx.storm) + wx.flash * 0.7;
   const u = sky.material.uniforms;
-  u.turbidity.value = 4 + 16 * wx.cover; u.rayleigh.value = 1.6 - 1.15 * wx.cover; u.mieCoefficient.value = 0.004 + 0.02 * wx.cover;
+  u.turbidity.value = 4 + 16 * wx.cover + 6 * ts.glow; u.rayleigh.value = 1.6 - 1.15 * wx.cover + 0.6 * ts.glow; u.mieCoefficient.value = 0.004 + 0.02 * wx.cover + 0.01 * ts.glow;
   wxFogColor.copy(_clear).lerp(_gray, Math.min(1, wx.cover * 0.8 + wx.rain * 0.3)).lerp(_dark, wx.storm * 0.55);
+  wxFogColor.lerp(_dusk, ts.glow * 0.55 * (1 - ts.night)).lerp(_nightFog, ts.night * 0.94);
   if (wx.flash > 0.02) wxFogColor.lerp(_clear, Math.min(1, wx.flash));
   wxFogNear = FOG_NEAR * (1 - 0.65 * wx.rain); wxFogFar = FOG_FAR * (1 - 0.58 * wx.rain - 0.15 * wx.cover);
-  if (clouds) clouds.update(dt, camPos, wx, [1 - 0.05 * wx.cover, 1 - 0.03 * wx.cover, 1]);
+  if (clouds) {
+    const gl = ts.glow * (1 - ts.night), nt = ts.night;
+    clouds.update(dt, camPos, wx, [(1 - 0.05 * wx.cover) * (1 - 0.0 * gl) * (1 - nt * 0.91), (1 - 0.03 * wx.cover) * (1 - 0.3 * gl) * (1 - nt * 0.89), (1 - 0.45 * gl) * (1 - nt * 0.8)]);
+  }
   if (rainFx) rainFx.update(t, camPos, wx);
   if (wx.flash > 0.6 && lastFlash <= 0.6) audio.thunder(0.8 + Math.random() * 2.6);
   lastFlash = wx.flash;
@@ -344,17 +388,123 @@ function updateInteraction() {
     }
   }
   nearest = best;
-  hud.setPrompt(best ? (best.labels ? best.labels[doorOpen.get(best.door) ? 1 : 0] : best.label) : null, best && best.soon);
+  hud.setPrompt(best ? (best.labels ? best.labels[doorOpen.get(best.door) ? 1 : 0] : best.dyn ? best.dyn() : best.label) : null, best && best.soon);
 }
 function interact() {
   if (player.sit && player.sit.bench) { stopEmote(); return; }
   if (!nearest) return;
   if (nearest.type === 'sit') sitOn(nearest);
   else if (nearest.type === 'door') setDoorOpen(nearest.door, !doorOpen.get(nearest.door), true);
-  else if (nearest.type === 'npc') { const n = npcs.find((q) => q.id === nearest.npc); if (n) { n.waveUntil = performance.now() + 2500; hud.toast(n.name.split(' · ')[0] + ': ' + n.lines[n.line++ % n.lines.length], 5600); } }
+  else if (nearest.type === 'npc') {
+    const n = npcs.find((q) => q.id === nearest.npc);
+    if (n) {
+      n.waveUntil = performance.now() + 2500;
+      const extra = missions ? missions.talk(n.id) : [];
+      const chat = n.name.split(' · ')[0] + ': ' + n.lines[n.line++ % n.lines.length];
+      showLines(n.id === 'sibu' && extra.length ? extra : [chat, ...extra], 5600);
+      rearmSpots();
+    }
+  }
+  else if (nearest.type === 'stall' && missions) { const lines = missions.buy(nearest.key); showLines([nearest.text, ...lines], 7000); rearmSpots(); }
   else if (nearest.text) hud.toast(nearest.text, 8000);
   else hud.toast(INTERACT_MSG[nearest.type] || `${nearest.label}: coming soon`);
 }
+
+// ======================= missions, jobs, coins =======================
+let missions = null, journalOpen = false, spotList = [], spotArmed = {}, lastCoins = null, lastObjSig = '';
+const STORE_KEY = 'bbsr_progress_v1';
+function showLines(lines, ms = 4200) {
+  lines = lines.filter(Boolean);
+  if (!lines.length) return;
+  hud.toast(lines.join('\n'), Math.min(14000, Math.max(ms, 2600 + lines.join(' ').length * 48)));
+  for (const l of lines) if (/^(Quest complete|Job done|Level up|New quest|Delivered|You have finished)/.test(l)) hud.addChat(null, l);
+  refreshQuest();
+}
+function rearmSpots() { spotArmed = {}; }
+function initMissions() {
+  const spots = spotsFromPlan(plan, { COMPOUND, LAKE, MAHAKALA });
+  spotList = Object.entries(spots).map(([id, p]) => ({ id, ...p }));
+  missions = createMissions({
+    plan, spots, hour: () => curHour,
+    load: () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch (e) { return null; } },
+    save: (s) => { try { localStorage.setItem(STORE_KEY, JSON.stringify(s)); } catch (e) { /* private window: progress lasts for this visit only */ } },
+  });
+  for (const it of plan.interactables) {
+    if (it.type !== 'stall') continue;
+    it.key = it.id.slice(6);
+    const item = ITEMS[it.key];
+    it.dyn = () => { const j = missions.state.job; return j && j.stage === 'buy' && j.key === it.key ? `Pick up Sibu's order (${item.name})` : `${item.carry ? 'Buy' : 'Eat'} ${item.name} · ${item.price} coins`; };
+  }
+  $('quest').addEventListener('click', () => toggleJournal());
+  refreshQuest();
+}
+function checkSpots() {
+  if (!missions) return;
+  for (const sp of spotList) {
+    const d = Math.hypot(player.x - sp.x, player.z - sp.z);
+    if (d < sp.r) { if (!spotArmed[sp.id]) { spotArmed[sp.id] = true; showLines(missions.spot(sp.id), 5200); } }
+    else if (d > sp.r * 1.5) spotArmed[sp.id] = false;
+  }
+}
+let objNow = null;
+function refreshQuest() {
+  if (!missions) return;
+  const st = missions.state, o = missions.objective(); objNow = o;
+  const lv = missions.level(), lo = missions.thisLevelXp(), hi = missions.nextLevelXp();
+  const coins = $('qCoins');
+  coins.textContent = '\u{1FA99} ' + st.coins;
+  if (lastCoins !== null && st.coins !== lastCoins) { coins.classList.remove('bump'); void coins.offsetWidth; coins.classList.add('bump'); }
+  lastCoins = st.coins;
+  $('qLevel').textContent = `Lv ${lv} · ${missions.levelName()}`;
+  $('qBar').firstElementChild.style.width = Math.round(100 * (st.xp - lo) / (hi - lo)) + '%';
+  $('qTitle').textContent = o.title; $('qTitle').className = o.kind === 'job' ? 'job' : '';
+  $('qText').textContent = o.text;
+  $('qArrow').firstElementChild.querySelector('path').setAttribute('fill', o.kind === 'job' ? '#55e0ff' : '#ffd24a');
+  const sig = o.title + o.text + o.x; if (sig !== lastObjSig) { lastObjSig = sig; beacon.set(o); }
+  if (journalOpen) renderJournal();
+}
+function updateQuestDistance() {
+  if (!objNow || objNow.x === undefined) { $('qMeters').textContent = ''; $('qArrow').style.visibility = 'hidden'; return; }
+  const dx = objNow.x - player.x, dz = objNow.z - player.z, d = Math.hypot(dx, dz);
+  $('qMeters').textContent = d < 8 ? 'You are here' : Math.round(d) + ' m';
+  const rel = Math.atan2(dx, dz) - (player.yaw + Math.PI);
+  $('qArrow').style.visibility = d < 8 ? 'hidden' : 'visible';
+  $('qArrow').style.transform = `rotate(${-rel}rad)`;
+}
+function renderJournal() {
+  const st = missions.state, cur = missions.currentQuest(), lv = missions.level();
+  const bag = [];
+  if (st.bag.flowers) bag.push(`Marigold garland x${st.bag.flowers}`);
+  if (st.bag.bangles) bag.push(`Glass bangles x${st.bag.bangles}`);
+  if (st.bag.job) bag.push(`Sibu's order: ${ITEMS[st.bag.job].name}`);
+  const quests = missions.quests().map((q) => {
+    const done = q.st.done, now = cur && cur.id === q.id, step = q.steps[Math.min(q.st.step, q.steps.length - 1)];
+    return `<div class="q ${done ? 'done' : ''} ${now ? 'now' : ''}"><b>${done ? '\u2713 ' : ''}${q.title}</b><span>${done ? q.end : now ? step.text : 'Locked: finish the quest before this one'}</span></div>`;
+  }).join('');
+  const menu = Object.entries(ITEMS).map(([k, it]) => `<span>${it.name}</span><span>${it.price} coins</span>`).join('');
+  $('jbox').innerHTML = `<h2>Journal</h2>
+    <div class="stats"><span>\u{1FA99} ${st.coins} coins</span><span>Level ${lv} · ${missions.levelName()}</span><span>${st.xp} XP</span><span>${st.jobsDone} deliveries</span></div>
+    <h3>Quests</h3>${quests}
+    <h3>Your bag</h3><div>${bag.length ? bag.join(' · ') : 'Empty'}</div>
+    <h3>Bazaar prices</h3><div class="menu">${menu}</div>
+    <h3>Delivery jobs</h3><div>Talk to Sibu at the chai adda for a delivery. He pays for the goods, you keep the tip (more after dark).</div>
+    <div class="row"><button class="main" id="jClose">Close</button><button id="jReset">Start over</button></div>`;
+  $('jClose').onclick = () => toggleJournal(false);
+  $('jReset').onclick = () => { if (confirm('Erase your coins, XP and quest progress?')) { missions.reset(); lastCoins = null; refreshQuest(); } };
+}
+function toggleJournal(force) {
+  if (!missions) return;
+  const open = force === undefined ? !journalOpen : force;
+  if (open === journalOpen) return;
+  journalOpen = open;
+  $('journal').classList.toggle('open', open);
+  if (open) { for (const k in keys) keys[k] = false; document.exitPointerLock?.(); renderJournal(); }
+  else if (!isTouch) { try { renderer.domElement.requestPointerLock(); } catch (e) { /* the overlay offers Play */ } }
+}
+const clockLine = () => {
+  const night = isNight(curHour);
+  return (night ? describe(wx).replace('\u2600\ufe0f', '\u{1F319}') : describe(wx)) + ' · ' + clockText(curHour);
+};
 
 // ======================= people of the Old Town (no doors here) =======================
 function setDoorOpen() {}
@@ -440,7 +590,7 @@ const hud = createHUD({
   onInteract: () => { if (active()) interact(); },
   onChatSubmit: (text, scope) => { if (socket) socket.emit('chat', { text, scope }); closeChat(); },
 });
-const active = () => ready && overlay.style.display === 'none' && !hud.isChatOpen() && !customizer.isOpen();
+const active = () => ready && overlay.style.display === 'none' && !hud.isChatOpen() && !customizer.isOpen() && !journalOpen;
 function rebuildSelf() {
   if (selfAvatar) disposeAvatar(selfAvatar);
   selfAvatar = makeAvatar(myCfg, name, false);
@@ -493,9 +643,10 @@ playBtn.addEventListener('click', () => {
 });
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === renderer.domElement;
-  if (!locked && !isTouch && ready && !hud.isChatOpen() && !hud.isBigMap() && !customizer.isOpen()) overlay.style.display = 'flex';
+  if (!locked && !isTouch && ready && !hud.isChatOpen() && !hud.isBigMap() && !customizer.isOpen() && !journalOpen) overlay.style.display = 'flex';
 });
-document.addEventListener('pointerlockerror', () => { if (ready && !hud.isChatOpen() && !customizer.isOpen()) overlay.style.display = 'flex'; });
+document.addEventListener('pointerlockerror', () => { if (ready && !hud.isChatOpen() && !customizer.isOpen() && !journalOpen) overlay.style.display = 'flex'; });
+addEventListener('keydown', (e) => { if (journalOpen && (e.code === 'KeyJ' || e.code === 'Escape')) { e.preventDefault(); toggleJournal(false); } });
 addEventListener('keydown', (e) => {
   if (hud.isChatOpen() || !active()) return;
   keys[e.code] = true;
@@ -506,6 +657,8 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyM') hud.toggleMap();
   if (e.code === 'KeyC') customizer.open();
   if (e.code === 'KeyK') cycleWeather();
+  if (e.code === 'KeyT') cycleTime();
+  if (e.code === 'KeyJ') toggleJournal(true);
   if (e.code === 'KeyO') toggleSound();
   if (e.code === 'KeyG') voice.toggleMic();
   audio.start();
@@ -683,9 +836,13 @@ function frame(now) {
       const h = ground(player.x, player.z, player.y);
       audio.update({ indoors, wind: wx.wind, gust: wx.gust, rain: wx.rain, storm: wx.storm, cover: wx.cover, water: 0.3 * Math.max(0, Math.min(1, (1.5 - lakeValue(player.x, player.z)) / 0.5)), forest: 0.3, underwater: false });
     }
-    if (frameNo % 30 === 11) $('wx').textContent = describe(wx);
+    if (frameNo % 30 === 11) $('wx').textContent = clockLine();
+    if (frameNo % 6 === 1) { checkSpots(); updateQuestDistance(); }
+    if (frameNo % 90 === 5) refreshQuest();
+    if (frameNo % 240 === 17) collectEnvMats();
+    beacon.update(t, 1 - ts.night);
     if (frameNo % 30 === 7 && !player.fly && !player.sit) pushOut();
-    if (!isTouch || frameNo % 2 === 0) hud.drawMinimap(player, [...others.values()].filter((o) => o.seen).map((o) => ({ x: o.group.position.x, z: o.group.position.z })));
+    if (!isTouch || frameNo % 2 === 0) hud.drawMinimap(player, [...others.values()].filter((o) => o.seen).map((o) => ({ x: o.group.position.x, z: o.group.position.z })), objNow);
   }
   if (town) town.update(t, waveHeight);
   if (waterUniforms) waterUniforms.uTime.value = t;
@@ -712,12 +869,15 @@ async function boot() {
   plan.circles.forEach((c) => addCollider(c.x, c.z, c.r, c.y0, c.y1));
   buildNpcs();
   interactables = plan.interactables;
+  glow = createLightGlow(THREE, collectLights(plan), { lite: LITE }); scene.add(glow.group);
+  collectEnvMats();
+  initMissions();
   hud.initMinimapImage(town.mapCanvas(), WORLD, plan.landmarks);
   // park the camera over the plaza looking at the Lingaraja tower until the player joins
   camera.position.set(150, 24, 280); camera.lookAt(-72, 28, 185);
   statusEl.textContent = 'Connecting to server...'; await nextFrame();
   connect();
 }
-window.__vw = { scene, camera, renderer, player, keys, hud, voice, setDoorOpen, doorOpen, get indoors() { return indoors; }, npcs, wx, setWeather: (m) => { weatherMode = m; wxInit = false; }, setWind: (v) => { windOverride = v; }, get vegetation() { return vegetation; }, get plan() { return plan; }, ground, blocked, setEmote, interact, get nearest() { return nearest; } };
+window.__vw = { scene, camera, renderer, player, keys, hud, voice, setDoorOpen, doorOpen, get indoors() { return indoors; }, npcs, wx, setWeather: (m) => { weatherMode = m; wxInit = false; }, setWind: (v) => { windOverride = v; }, get vegetation() { return vegetation; }, get plan() { return plan; }, ground, blocked, setEmote, interact, get nearest() { return nearest; }, get missions() { return missions; }, get ts() { return ts; }, get hour() { return curHour; }, setTime: (h) => { todOverride = h; }, showLines, checkSpots, get glow() { return glow; }, get beacon() { return beacon; }, toggleJournal };
 requestAnimationFrame(frame);
 boot().catch((e) => { statusEl.textContent = 'Error: ' + e.message; console.error(e); });

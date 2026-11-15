@@ -58,7 +58,7 @@
   #interact { display: none; position: fixed; left: 50%; bottom: 104px; transform: translateX(-50%); z-index: 9; align-items: center; gap: 10px; background: var(--glass); border: 1px solid var(--line); border-radius: 12px; padding: 8px 16px 8px 8px; font-size: 16px; font-weight: 600; cursor: pointer; }
   #interact .key { background: #fff; color: #111; border-radius: 7px; min-width: 28px; height: 28px; line-height: 28px; text-align: center; font-weight: 800; }
   body.touch #interact { bottom: 170px; }
-  #toast { position: fixed; left: 50%; top: 22px; transform: translate(-50%, -20px); opacity: 0; z-index: 25; background: rgba(10,22,36,.85); border: 1px solid var(--line); padding: 10px 18px; border-radius: 12px; font-size: 14px; transition: opacity .25s, transform .25s; pointer-events: none; max-width: 80vw; text-align: center; }
+  #toast { position: fixed; left: 50%; top: 22px; transform: translate(-50%, -20px); opacity: 0; z-index: 25; background: rgba(10,22,36,.85); border: 1px solid var(--line); padding: 10px 18px; border-radius: 12px; font-size: 14px; transition: opacity .25s, transform .25s; pointer-events: none; max-width: 80vw; text-align: center; white-space: pre-line; }
   #toast.show { opacity: 1; transform: translate(-50%, 0); }
 
   /* overlay */
@@ -129,6 +129,31 @@
   .cz-foot .cz-save { background: #2f7bff; border-color: transparent; }
   @media (max-width: 760px) { .cz-body { flex-direction: column; gap: 10px; } .cz-left { flex: none; } .cz-stage { width: 100%; height: 250px; } .cz-hint { display: none; } }
 
+
+  /* quests, coins, journal */
+  #quest { position: fixed; top: 12px; right: 12px; width: 268px; z-index: 9; background: var(--glass); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; font-size: 13px; line-height: 1.35; cursor: pointer; }
+  #qPurse { display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 14px; }
+  #qCoins.bump { animation: bump .5s; } @keyframes bump { 40% { transform: scale(1.35); color: #ffd24a; } }
+  #qLevel { font-weight: 600; opacity: .85; font-size: 12px; }
+  #qBar { height: 5px; border-radius: 3px; background: rgba(255,255,255,.16); margin: 6px 0 8px; overflow: hidden; } #qBar i { display: block; height: 100%; width: 0; background: #ffd24a; transition: width .4s; }
+  #qTitle { font-weight: 800; color: #ffd24a; } #qTitle.job { color: #55e0ff; }
+  #qText { opacity: .95; margin-top: 2px; }
+  #qDist { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-weight: 700; opacity: .9; }
+  #qArrow { display: inline-block; width: 20px; height: 20px; transition: transform .15s; } #qArrow svg { width: 20px; height: 20px; display: block; }
+  #qKey { opacity: .55; font-size: 11px; margin-top: 6px; }
+  body.touch #quest { top: 82px; right: auto; left: 50%; transform: translateX(-50%); width: min(300px, 74vw); padding: 7px 10px; font-size: 12px; }
+  body.touch #qKey { display: none; }
+  #journal { position: fixed; inset: 0; z-index: 40; background: rgba(5,10,18,.78); display: none; align-items: center; justify-content: center; padding: 12px; }
+  #journal.open { display: flex; }
+  #jbox { width: min(560px, 100%); max-height: 88vh; overflow: auto; background: rgba(14,26,42,.97); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; font-size: 14px; line-height: 1.45; }
+  #jbox h2 { margin: 0 0 4px; font-size: 20px; } #jbox h3 { margin: 16px 0 6px; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; opacity: .6; }
+  #jbox .stats { display: flex; gap: 14px; flex-wrap: wrap; opacity: .9; }
+  #jbox .q { padding: 8px 10px; border-radius: 10px; background: rgba(255,255,255,.06); margin-bottom: 6px; } #jbox .q.done { opacity: .55; } #jbox .q.now { outline: 2px solid #ffd24a; }
+  #jbox .q b { display: block; } #jbox .q span { opacity: .85; font-size: 13px; }
+  #jbox .menu { display: grid; grid-template-columns: 1fr auto; gap: 2px 14px; font-size: 13px; }
+  #jbox .row { display: flex; gap: 10px; margin-top: 16px; } #jbox button { padding: 9px 16px; border-radius: 10px; border: 1px solid var(--line); background: rgba(255,255,255,.1); color: #fff; font-weight: 600; cursor: pointer; font-size: 13px; }
+  #jbox button.main { background: #2f7bff; border-color: transparent; }
+
   /* touch controls */
   #touchpad { position: fixed; inset: 0; z-index: 4; display: none; }
   #stick { position: fixed; width: 100px; height: 100px; margin: -50px 0 0 -50px; border-radius: 50%; border: 2px solid rgba(255,255,255,.4); z-index: 5; display: none; pointer-events: none; }
@@ -161,6 +186,14 @@
 
 <div id="emotes"></div>
 <div id="interact"><span class="key">E</span><span id="ilabel"></span></div>
+<div id="quest" title="Press J for your journal">
+  <div id="qPurse"><span id="qCoins">🪙 0</span><span id="qLevel"></span></div>
+  <div id="qBar"><i></i></div>
+  <div id="qTitle"></div><div id="qText"></div>
+  <div id="qDist"><span id="qArrow"><svg viewBox="0 0 24 24"><path d="M12 2 L20 20 L12 15 L4 20 Z" fill="#ffd24a" stroke="#000" stroke-opacity=".6" stroke-width="1.4" stroke-linejoin="round"/></svg></span><span id="qMeters"></span></div>
+  <div id="qKey">J journal · T time of day</div>
+</div>
+<div id="journal"><div id="jbox"></div></div>
 <div id="toast"></div>
 
 <div id="touchpad"></div>
@@ -181,7 +214,7 @@
     <button id="play" disabled>Play</button><button id="playCustom">👤 Customize avatar</button>
     <div id="help">
       Chapter 1: Ekamra Kshetra, the temple quarter. Walk the bazaar, sit by Bindusagar, find the Lingaraja Temple.<br><b>Desktop:</b> <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>E</kbd> interact · <kbd>1</kbd>-<kbd>9</kbd> emotes<br>
-      <kbd>V</kbd> first / third person · <kbd>M</kbd> big map · <kbd>C</kbd> avatar · <kbd>F</kbd> fly · <kbd>Enter</kbd> chat · <kbd>K</kbd> change weather · <kbd>O</kbd> sound · <kbd>G</kbd> microphone (nearby players hear you)<br>
+      <kbd>V</kbd> first / third person · <kbd>M</kbd> big map · <kbd>C</kbd> avatar · <kbd>F</kbd> fly · <kbd>Enter</kbd> chat · <kbd>K</kbd> change weather · <kbd>T</kbd> time of day · <kbd>J</kbd> journal (quests, coins) · <kbd>O</kbd> sound · <kbd>G</kbd> microphone (nearby players hear you)<br>
       <div id="build" style="opacity:.5;font-size:11px;margin-top:6px"></div>
       <b>Phone:</b> left thumb moves · drag right side to look · tap the minimap to enlarge it
     </div>

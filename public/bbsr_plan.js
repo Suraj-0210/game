@@ -316,7 +316,7 @@ export function buildPlan(osm = null) {
       'If it rains, come back. Dahibara tastes best on a wet evening.',
       'Try the chhena poda two stalls down. Tell them Mausi sent you.',
     ] },
-    { id: 'sibu', name: 'Sibu · Chai adda', cfg: SIBU, x: chai.x, z: chai.z - 3.4, yaw: 0, label: 'Talk to Sibu', lines: [
+    { id: 'sibu', name: 'Sibu · Chai adda', cfg: SIBU, x: chai.x, z: chai.z - 3.4, yaw: 0, label: 'Talk to Sibu (delivery jobs)', lines: [
       'Chai? Sit, sit. The tables are for Ludo. We are getting it ready.',
       'Four players, one board, and a lot of shouting. That is how Ludo should be.',
       'Watch out for rain: it comes at the same time every afternoon. Everybody runs under the shed.',

@@ -14,8 +14,8 @@ app.use(express.static(path.join(__dirname, "public")));
 app.use("/three", express.static(path.join(__dirname, "node_modules/three")));
 
 // Diagnostics: open /health on your site to see which version is live and whether any game file is missing.
-const BUILD = "2026-11-13 island + Bhubaneswar Old Town (alpha)";
-const REQUIRED = ["bhubaneswar.html", "bbsr.js", "bbsr_plan.js", "bbsr_mesh.js", "bbsr_tex.js", "index.html", "main.js", "island.js", "textures.js", "town.js", "townmesh.js", "hotel.js", "interiors.js", "hud.js", "avatar.js", "customize.js", "weather.js", "atmosphere.js", "audio.js", "foliage.js", "vegetation.js", "voice.js"];
+const BUILD = "2026-11-13 island + Bhubaneswar Old Town (alpha: quests, jobs, day and night)";
+const REQUIRED = ["bhubaneswar.html", "bbsr.js", "bbsr_plan.js", "bbsr_mesh.js", "bbsr_tex.js", "bbsr_missions.js", "bbsr_night.js", "bbsr_time.js", "index.html", "main.js", "island.js", "textures.js", "town.js", "townmesh.js", "hotel.js", "interiors.js", "hud.js", "avatar.js", "customize.js", "weather.js", "atmosphere.js", "audio.js", "foliage.js", "vegetation.js", "voice.js"];
 app.get(["/bhubaneswar", "/bbsr"], (req, res) => res.sendFile(path.join(__dirname, "public", "bhubaneswar.html")));
 app.get("/health", (req, res) => {
   const files = {};

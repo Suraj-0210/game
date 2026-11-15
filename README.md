@@ -18,3 +18,10 @@ Bindusagar, Mahakala-Mahakali Temple). To use the real OpenStreetMap streets, bu
 
 Restart the server. The game uses the file automatically (and shows "Map data (c) OpenStreetMap contributors").
 Delete the file to go back to the hand-drawn layout. Keep the OpenStreetMap credit: the data is licensed ODbL.
+
+## Old Town: quests, jobs and day/night
+
+- `public/bbsr_missions.js`: five story quests, delivery jobs from Sibu at the chai adda, coins, XP and levels. Pure logic. Test it with `node tools/test_missions.mjs`.
+- `public/bbsr_time.js`: the shared clock (30 real minutes per day, same for every player) and the sun path.
+- `public/bbsr_night.js`: stars, moon, glowing lamps, the light pool, and the objective beacon.
+- Progress is saved in the player's own browser (localStorage), so it is per device. Press **J** for the journal and **T** to look at another time of day (only you see that).

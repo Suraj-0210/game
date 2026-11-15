@@ -118,7 +118,7 @@ export function createHUD({ isTouch, onEmote, onInteract, onChatSubmit }) {
     else { ctx.fillStyle = '#48dbfb'; ctx.beginPath(); ctx.rect(-r * 0.25, -r, r * 0.5, r * 2); ctx.stroke(); ctx.fill(); }
     ctx.restore();
   };
-  const drawMinimap = (player, others) => {
+  const drawMinimap = (player, others, mark) => {
     if (!base) return;
     const px = cv.width, big = state.bigMap, span = big ? WS : VIEW, scale = px / span;
     const ox = big ? -WH : player.x - span / 2, oz = big ? -WH : player.z - span / 2;
@@ -135,6 +135,14 @@ export function createHUD({ isTouch, onEmote, onInteract, onChatSubmit }) {
       if (x < -ir || y < -ir || x > px + ir || y > px + ir) continue;
       drawIcon(lm.kind, x, y, ir);
       if (big) { ctx.font = `bold ${12 * dpr}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.lineWidth = 3 * dpr; ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.fillStyle = '#fff'; ctx.strokeText(lm.name, x, y - ir - 4 * dpr); ctx.fillText(lm.name, x, y - ir - 4 * dpr); }
+    }
+    if (mark && mark.x !== undefined) {   // the current objective: a pulsing diamond, pinned to the rim when it is off the map
+      let x = (mark.x - ox) * scale, y = (mark.z - oz) * scale;
+      const c = px / 2, dx = x - c, dy = y - c, dd = Math.hypot(dx, dy), lim = c - 10 * dpr;
+      if (dd > lim) { x = c + (dx / dd) * lim; y = c + (dy / dd) * lim; }
+      const pr = (7 + 1.8 * Math.sin(performance.now() / 260)) * dpr;
+      ctx.fillStyle = mark.kind === 'job' ? '#55e0ff' : '#ffd24a'; ctx.strokeStyle = 'rgba(0,0,0,.8)'; ctx.lineWidth = 2 * dpr;
+      ctx.beginPath(); ctx.moveTo(x, y - pr); ctx.lineTo(x + pr * 0.8, y); ctx.lineTo(x, y + pr); ctx.lineTo(x - pr * 0.8, y); ctx.closePath(); ctx.stroke(); ctx.fill();
     }
     for (const o of others) {
       const x = (o.x - ox) * scale, y = (o.z - oz) * scale;
