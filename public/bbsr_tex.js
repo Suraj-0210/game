@@ -12,20 +12,20 @@ export function makeCityTextures(aniso = 4) {
   // warm grey-ochre sandstone with fine carved bands, like the Kalinga temples
   const sandstone = pixelTexture(S, (u, v, x, y) => {
     const n = tfbm(u, v, 6, 5, 31), w = tfbm(u, v, 18, 3, 7);
-    let c = mix([150, 126, 98], [196, 168, 128], n * 0.85 + w * 0.15);
-    const band = Math.abs(((v * 8) % 1) - 0.5);                       // horizontal mouldings every 1/8
-    if (band > 0.46) c = mix(c, [86, 68, 52], 0.55);
-    else if (band > 0.40) c = mix(c, [220, 196, 156], 0.25);
-    const vert = Math.abs(((u * 16) % 1) - 0.5);                      // faint vertical rib shading
-    if (vert > 0.47) c = mix(c, [96, 78, 60], 0.18);
-    const g = 0.9 + 0.2 * grain(x, y, 4);
+    let c = mix([88, 74, 64], [150, 128, 104], n * 0.8 + w * 0.2);       // weathered brown-grey khondalite
+    const band = Math.abs(((v * 16) % 1) - 0.5);                           // fine horizontal ridges
+    if (band > 0.44) c = mix(c, [52, 42, 36], 0.6);
+    else if (band > 0.36) c = mix(c, [176, 152, 124], 0.18);
+    const vert = Math.abs(((u * 12) % 1) - 0.5);                           // vertical grooves between the pilaster bands
+    if (vert > 0.45) c = mix(c, [48, 40, 34], 0.55);
+    const g = 0.85 + 0.3 * grain(x, y, 4);
     return clampC([c[0] * g, c[1] * g, c[2] * g]);
   }, true, aniso);
 
   // red-brown laterite blocks (compound walls, tank embankment)
   const laterite = pixelTexture(S, (u, v, x, y) => {
     const n = tfbm(u, v, 10, 4, 51);
-    let c = mix([120, 62, 42], [172, 98, 62], n);
+    let c = mix([92, 50, 36], [140, 80, 54], n);
     const row = Math.floor(v * 8), off = row % 2 ? 0.5 : 0;
     const bu = ((u * 4 + off) % 1), bv = (v * 8) % 1;
     if (bu < 0.03 || bv < 0.05) c = mix(c, [62, 36, 28], 0.6);

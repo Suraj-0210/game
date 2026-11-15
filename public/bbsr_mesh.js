@@ -96,26 +96,42 @@ function rekha(B, G, cx, cz, w, H, yaw, o = {}) {
     B.box(q[0], q[1], bodyH * 0.24, bw, bodyH * 0.58, bd, yaw, STONE, { top: false });
   }
   B.box(cx, cz, bodyH * 0.84, w * 1.03, bodyH * 0.16, w * 1.03, yaw, STONE);
-  // curved tower
-  const hw0 = w * 0.475, neck = hw0 * 0.40, rings = [], yTop = H * 0.86;
+  // curved tower: almost straight-sided, a slight taper, then it curves in over the top third (as on the real Lingaraja tower)
+  const hw0 = w * 0.475, neck = hw0 * 0.60, rings = [], yTop = H * 0.86;
+  const hwAt = (t) => (t < 0.62 ? hw0 * (1 - 0.10 * t) : (() => { const u = (t - 0.62) / 0.38, m = hw0 * 0.938; return m - (m - neck) * Math.pow(u, 1.7); })());
   for (let l = 0; l <= levels; l++) {
-    const t = l / levels, y = bodyH + (yTop - bodyH) * t, hw = hw0 - (hw0 - neck) * Math.pow(t, 1.75), ring = [];
+    const t = l / levels, y = bodyH + (yTop - bodyH) * t, hw = hwAt(t), ring = [], fade = 1 - 0.55 * t;
     for (let k = 0; k <= M; k++) {
-      const th = (k / M) * Math.PI * 2, c = Math.cos(th), s = Math.sin(th), e = 2 / 6;
-      const rib = 1 + 0.05 * Math.cos(12 * th) * (1 - 0.5 * t) + (t > 0.015 && Math.floor(t * 26) % 2 === 0 ? 0.012 : 0);
-      const x = hw * Math.sign(c) * Math.pow(Math.abs(c), e) * rib, z = hw * Math.sign(s) * Math.pow(Math.abs(s), e) * rib, q = rot(x, z);
+      const th = (k / M) * Math.PI * 2, c = Math.cos(th), sn = Math.sin(th), e = 2 / 6;
+      // raha (central raised band) on each face, pilaster bands beside it, fine ribs; a thin horizontal ridge every few steps
+      const rib = 1 + fade * (0.07 * Math.cos(4 * th) + (M >= 48 ? 0.045 * Math.cos(12 * th) : 0) + (M >= 72 ? 0.02 * Math.cos(24 * th) : 0)) + (t > 0.015 && Math.floor(t * 44) % 2 === 0 ? 0.014 : 0);
+      const x = hw * Math.sign(c) * Math.pow(Math.abs(c), e) * rib, z = hw * Math.sign(sn) * Math.pow(Math.abs(sn), e) * rib, q = rot(x, z);
       ring.push([q[0], y, q[1]]);
     }
     rings.push(ring);
   }
   B.loft(rings, 6, 6, STONE);
-  // amalaka (ribbed disc) and kalasa (pot) with a flagstaff
-  const ar = neck * 1.55, ah = H * 0.065, ay = yTop, arings = [];
-  const prof = [[0.86, 0], [1.0, 0.18], [1.1, 0.45], [1.0, 0.75], [0.7, 1]];
-  for (const [rf, hf] of prof) { const ring = []; for (let k = 0; k <= 36; k++) { const th = (k / 36) * Math.PI * 2, rr = ar * rf * (1 + 0.07 * Math.cos(32 * th)), q = rot(Math.cos(th) * rr, Math.sin(th) * rr); ring.push([q[0], ay + ah * hf, q[1]]); } arings.push(ring); }
+  // carved arched niche on the centre of each face, low on the shaft
+  for (const [lx, lz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const q = rot(lx * (hwAt(0.1) * 1.06), lz * (hwAt(0.1) * 1.06)), ny = bodyH + (yTop - bodyH) * 0.1;
+    B.box(q[0], q[1], ny, lx ? 0.7 : w * 0.16, H * 0.07, lx ? w * 0.16 : 0.7, yaw, 0xb8a58c, { us: 2, vs: 2 });
+  }
+  // crouching lions (simha) on the four corners about halfway up the shaft
+  if (o.lions) {
+    const ly = bodyH + (yTop - bodyH) * 0.40, hl = hwAt(0.40) * 0.86, ls = H * 0.05;
+    for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+      const q = rot(sx * hl, sz * hl), a = yaw + Math.atan2(sx, sz), f = rot(sx * (hl + ls * 0.55), sz * (hl + ls * 0.55));
+      B.box(q[0], q[1], ly, ls * 0.9, ls * 0.75, ls * 1.5, a, 0xc9b79c, { us: 2, vs: 2 });
+      B.box(f[0], f[1], ly + ls * 0.45, ls * 0.65, ls * 0.8, ls * 0.65, a, 0xc9b79c, { us: 2, vs: 2 });
+    }
+  }
+  // amalaka: a very wide ribbed cushion with a thick rim, wider than the shaft below it
+  const ar = neck * 1.3, ah = H * 0.07, ay = yTop, arings = [];
+  const prof = [[0.8, 0], [1.0, 0.14], [1.08, 0.34], [1.1, 0.56], [1.0, 0.78], [0.72, 0.93], [0.5, 1]];
+  for (const [rf, hf] of prof) { const ring = []; for (let k = 0; k <= 48; k++) { const th = (k / 48) * Math.PI * 2, rr = ar * rf * (1 + 0.06 * Math.cos(40 * th)), q = rot(Math.cos(th) * rr, Math.sin(th) * rr); ring.push([q[0], ay + ah * hf, q[1]]); } arings.push(ring); }
   B.loft(arings, 4, 4, STONE);
-  const ky = ay + ah, kh = H * 0.07, krings = [], kp = [[0.25, 0], [0.7, 0.12], [1.0, 0.35], [0.8, 0.62], [0.35, 0.8], [0.25, 0.9], [0.0, 1.0]];
-  for (const [rf, hf] of kp) { const ring = []; for (let k = 0; k <= 20; k++) { const th = (k / 20) * Math.PI * 2, rr = neck * 0.55 * rf + 0.001, q = rot(Math.cos(th) * rr, Math.sin(th) * rr); ring.push([q[0], ky + kh * hf, q[1]]); } krings.push(ring); }
+  const ky = ay + ah, kh = H * 0.06, krings = [], kp = [[0.25, 0], [0.7, 0.12], [1.0, 0.35], [0.8, 0.62], [0.35, 0.8], [0.25, 0.9], [0.0, 1.0]];
+  for (const [rf, hf] of kp) { const ring = []; for (let k = 0; k <= 20; k++) { const th = (k / 20) * Math.PI * 2, rr = neck * 0.42 * rf + 0.001, q = rot(Math.cos(th) * rr, Math.sin(th) * rr); ring.push([q[0], ky + kh * hf, q[1]]); } krings.push(ring); }
   G.loft(krings, 2, 2, 0xd9a830);
   const pole = H * 0.07;
   G.box(cx, cz, ky + kh, 0.12, pole, 0.12, 0, 0x7a6038, { us: 2, vs: 2 });
@@ -127,16 +143,18 @@ function pidha(B, G, cx, cz, w, d, h, tiers, yaw, o = {}) {
   const STONE = o.stone || 0xf2e2c6, baseH = o.noBase ? 0 : h * 0.5, th = (h - baseH) / tiers;
   if (!o.noBase) { B.box(cx, cz, 0, w * 1.04, 0.9, d * 1.04, yaw, STONE); B.box(cx, cz, 0.9, w, baseH - 0.9, d, yaw, STONE); }
   let y = (o.y0 || 0) + baseH;
-  for (let i = 0; i < tiers; i++) {
-    const f = 1 - 0.8 * (i / tiers), wi = Math.max(1.2, w * f), di = Math.max(1.2, d * f);
-    B.box(cx, cz, y, wi + 0.7, th * 0.35, di + 0.7, yaw, STONE);
-    B.box(cx, cz, y + th * 0.35, wi, th * 0.65, di, yaw, STONE);
-    y += th;
+  const n2 = tiers * 2, th2 = (h - baseH) / n2;
+  for (let i = 0; i < n2; i++) {
+    const f = 1 - 0.78 * (i / n2), wi = Math.max(1.2, w * f), di = Math.max(1.2, d * f);
+    B.box(cx, cz, y, wi + 0.55, th2 * 0.4, di + 0.55, yaw, STONE);
+    B.box(cx, cz, y + th2 * 0.4, wi, th2 * 0.6, di, yaw, STONE);
+    y += th2;
   }
   const ar = Math.max(w, d) * 0.12;
-  B.box(cx, cz, y, ar * 2.2, ar * 0.8, ar * 2.2, yaw, STONE);
-  G.box(cx, cz, y + ar * 0.8, 0.5, ar * 1.8, 0.5, 0, 0xd9a830, { us: 2, vs: 2 });
-  return y + ar * 2.6;
+  B.box(cx, cz, y, ar * 2.4, ar * 0.7, ar * 2.4, yaw, STONE);              // ribbed bell cap
+  B.box(cx, cz, y + ar * 0.7, ar * 1.7, ar * 0.5, ar * 1.7, yaw, STONE);
+  G.box(cx, cz, y + ar * 1.2, 0.35, ar * 1.1, 0.35, 0, 0xd9a830, { us: 2, vs: 2 });
+  return y + ar * 2.4;
 }
 
 // the points of a closed ring pushed outwards by d metres (numeric gradient of the tank's equation)
@@ -218,7 +236,7 @@ export function buildCity({ THREE, mergeGeometries }, plan, tex, opts = {}) {
     pidha(stone, gold, g.x, g.z, 6.4, g.w + 10, 3.6, 3, 0, { noBase: true, y0: 7.5, stone: 0xecd9b8 });   // roof only: the passage underneath stays open
   }
   for (const t of plan.temples) {
-    if (t.id === 'lingaraj') rekha(stone, gold, t.x, t.z, t.w, t.h, 0, { levels: 56, sides: 96, stone: 0xf4e4c8 });
+    if (t.id === 'lingaraj') rekha(stone, gold, t.x, t.z, t.w, t.h, 0, { levels: 64, sides: 96, stone: 0xf4e4c8, lions: true });
     else if (t.kind === 'hall') pidha(stone, gold, t.x, t.z, t.w, t.d, t.h, t.tiers, 0, { stone: 0xf0dfc2 });
     else if (t.kind === 'minor') {
       const c = Math.cos(t.yaw), s = Math.sin(t.yaw);
