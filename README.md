@@ -25,3 +25,11 @@ Delete the file to go back to the hand-drawn layout. Keep the OpenStreetMap cred
 - `public/bbsr_time.js`: the shared clock (30 real minutes per day, same for every player) and the sun path.
 - `public/bbsr_night.js`: stars, moon, glowing lamps, the light pool, and the objective beacon.
 - Progress is saved in the player's own browser (localStorage), so it is per device. Press **J** for the journal and **T** to look at another time of day (only you see that).
+
+## Areas of Bhubaneswar (zones)
+
+Besides the Old Town there are six more walkable areas: Khandagiri, Baramunda, Jaydev Vihar, Vani Vihar, Rasulgarh and Patia / Infocity.
+Each is its own 1 km zone with its own multiplayer room. Walk to the AUTO STAND in an area and press E to choose where to travel
+(or open `?zone=<id>`, e.g. `?zone=patia`). Ids: oldtown, khandagiri, baramunda, jaydev, vanivihar, rasulgarh, patia.
+Each area has 4 places to discover for XP. Plans are in `public/bbsr_zones.js`, extra meshes in `public/bbsr_zone_mesh.js`.
+Test: `node tools/test_zones.mjs`.
