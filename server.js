@@ -14,8 +14,8 @@ app.use(express.static(path.join(__dirname, "public")));
 app.use("/three", express.static(path.join(__dirname, "node_modules/three")));
 
 // Diagnostics: open /health on your site to see which version is live and whether any game file is missing.
-const BUILD = "2026-11-13 island + Bhubaneswar Old Town (alpha: quests, jobs, day and night, one connected city)";
-const REQUIRED = ["bhubaneswar.html", "bbsr.js", "bbsr_plan.js", "bbsr_mesh.js", "bbsr_tex.js", "bbsr_missions.js", "bbsr_zones.js", "bbsr_city.js", "bbsr_zone_mesh.js", "bbsr_night.js", "bbsr_time.js", "index.html", "main.js", "island.js", "textures.js", "town.js", "townmesh.js", "hotel.js", "interiors.js", "hud.js", "avatar.js", "customize.js", "weather.js", "atmosphere.js", "audio.js", "foliage.js", "vegetation.js", "voice.js"];
+const BUILD = "2026-11-13 island + Bhubaneswar Old Town (alpha: quests, jobs, day and night, one connected city, drivable cars)";
+const REQUIRED = ["bhubaneswar.html", "bbsr.js", "bbsr_plan.js", "bbsr_mesh.js", "bbsr_tex.js", "bbsr_missions.js", "bbsr_zones.js", "bbsr_city.js", "bbsr_vehicles.js", "bbsr_vehicles_kit.js", "bbsr_zone_mesh.js", "bbsr_night.js", "bbsr_time.js", "index.html", "main.js", "island.js", "textures.js", "town.js", "townmesh.js", "hotel.js", "interiors.js", "hud.js", "avatar.js", "customize.js", "weather.js", "atmosphere.js", "audio.js", "foliage.js", "vegetation.js", "voice.js"];
 app.get(["/bhubaneswar", "/bbsr"], (req, res) => res.sendFile(path.join(__dirname, "public", "bhubaneswar.html")));
 app.get("/health", (req, res) => {
   const files = {};
@@ -77,9 +77,11 @@ io.on("connection", (socket) => {
     if (!player || !m || !isNum(m.x) || !isNum(m.y) || !isNum(m.z) || !isNum(m.ry)) return;
     if (Math.abs(m.x) > LIMIT || Math.abs(m.z) > LIMIT || m.y < -100 || m.y > 1000) return;
     const em = Number.isInteger(m.em) && m.em >= 0 && m.em <= 10 ? m.em : 0; // 1-9 emotes, 10 = seated on a bench
-    player.x = m.x; player.y = m.y; player.z = m.z; player.ry = m.ry; player.em = em;
+    const veh = Number.isInteger(m.veh) && m.veh >= 0 && m.veh <= 6 ? m.veh : 0;                       // 0 = on foot, 1-6 = the kind of vehicle being driven
+    const vc = veh && Number.isInteger(m.vc) && m.vc >= 0 && m.vc <= 0xffffff ? m.vc : 0;              // its paint colour
+    player.x = m.x; player.y = m.y; player.z = m.z; player.ry = m.ry; player.em = em; player.veh = veh; player.vc = vc;
     player.hasPos = true;
-    socket.to(world).emit("playerMoved", { id: player.id, x: m.x, y: m.y, z: m.z, ry: m.ry, em });
+    socket.to(world).emit("playerMoved", { id: player.id, x: m.x, y: m.y, z: m.z, ry: m.ry, em, veh, vc });
   });
 
   // voice chat handshakes (WebRTC offers/answers/ICE) are only relayed; the audio itself never touches the server

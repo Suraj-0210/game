@@ -21,6 +21,8 @@ import { createVegetation } from './vegetation.js';
 import { createClouds, createRain } from './atmosphere.js';
 import { createAudio } from './audio.js';
 import { createVoice } from './voice.js';
+import { createKit } from './bbsr_vehicles_kit.js';
+import { createVehicles, TYPE_ID, VEHICLE_NAMES } from './bbsr_vehicles.js';
 
 const $ = (id) => document.getElementById(id);
 const isTouch = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
@@ -315,6 +317,7 @@ function moveH(dx, dz) {
   if (!inWorld(nx, nz)) return false;
   // solid things block you (also while flying); if you are already inside one you may move out of it
   if (blocked(nx, nz, PR, player.y) && !blocked(ox, oz, PR, player.y)) return false;
+  if (veh && !player.fly && veh.solid(nx, nz, PR) && !veh.solid(ox, oz, PR)) return false;   // parked cars are solid too
   player.x = nx; player.z = nz;
   return true;
 }
@@ -329,7 +332,7 @@ function pushOut() {
 }
 const EMOTE_TIME = { 1: 3200, 4: 3200, 5: 3500, 6: 3000, 7: 3600, 8: 4200 }; // the rest (dance, sit, sleep) last until you move
 function setEmote(id, now = performance.now()) {
-  if (id < 1 || id > MAX_EMOTE) return;
+  if (id < 1 || id > MAX_EMOTE || driving()) return;
   if (player.sit && player.sit.bench && id !== 3) return;
   if (id === player.emote) { stopEmote(); return; }
   player.emote = id;
@@ -349,6 +352,39 @@ function stopEmote() {
 function sitOn(it) {
   player.x = it.x; player.z = it.z; player.y = it.y; player.yaw = it.yaw; player.vy = 0; player.onGround = true;
   player.sit = { bench: true }; player.emote = 3; player.emoteUntil = 0;
+}
+// ======================= vehicles =======================
+let veh = null, lastLookAt = 0, speedoEl = null;
+const BASE_FOV = 70;
+const driving = () => !!(veh && veh.cur);
+function buildVehicles() {
+  const kit = createKit(THREE, mergeGeometries);
+  const roads = CITY
+    ? [...parts.flatMap((pt) => pt.plan.roads.map((r) => ({ pts: r.pts.map((q) => [q[0] + pt.ox, q[1] + pt.oz]), w: r.w, main: r.main }))), ...cityLinks.map((l) => ({ pts: l.pts, w: l.w, main: true }))]
+    : plan.roads.map((r) => ({ pts: r.pts, w: r.w, main: r.main }));
+  veh = createVehicles({ THREE, kit, scene, roads, blocked, ground, inWorld, spawn: plan.spawn, lite: LITE, getAudio: () => { audio.start(); return audio.getContext(); } });
+  veh.seedParked(LITE ? 90 : 150);
+  speedoEl = document.createElement('div');
+  speedoEl.style.cssText = 'position:fixed;left:50%;top:128px;transform:translateX(-50%);display:none;padding:8px 18px;border-radius:12px;background:rgba(10,14,20,.62);color:#fff;font:600 15px system-ui,sans-serif;letter-spacing:.3px;z-index:6;pointer-events:none;text-align:center';
+  document.body.appendChild(speedoEl);
+}
+function enterCar(c) {
+  if (!veh || driving()) return;
+  if (player.emote) stopEmote();
+  player.fly = false;
+  if (!veh.enter(c, player)) return;
+  player.pitch = 0.12; lastLookAt = 0;
+  hud.toast(`${VEHICLE_NAMES[c.type]}: W/S gas and brake · A/D steer · Space handbrake · Shift boost · H horn · L lights · E get out`, 6500);
+  sendPosition(performance.now(), true);
+}
+function leaveCar() { if (driving()) { veh.exit(player); player.pitch = 0; sendPosition(performance.now(), true); } }
+function updateDrive(dt) {
+  const c = veh.cur, kd = (a, b) => (keys[a] || keys[b] ? 1 : 0);
+  const f = kd('KeyW', 'ArrowUp') - kd('KeyS', 'ArrowDown') - touch.my, st = kd('KeyD', 'ArrowRight') - kd('KeyA', 'ArrowLeft') + touch.mx;
+  c.look = Math.atan2(Math.sin(player.yaw - c.yaw), Math.cos(player.yaw - c.yaw));          // the mouse turns the view; it drifts back behind the car
+  if (performance.now() - lastLookAt > 1500) { c.look *= Math.exp(-dt * 2.2); player.pitch += (0.12 - player.pitch) * Math.min(1, dt * 2); }
+  veh.drive(dt, { f, s: st, brake: !!(keys.Space || touch.jump), boost: !!(keys.ShiftLeft || keys.ShiftRight || touch.run), horn: !!keys.KeyH }, player, audio.isOn());
+  player.yaw = c.yaw + c.look;
 }
 function updatePlayer(dt, now) {
   let f = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) - touch.my;
@@ -399,6 +435,7 @@ const INTERACT_MSG = {
   shop: null,
 };
 function updateInteraction() {
+  if (driving()) { hud.setPrompt('Get out'); nearest = null; return; }
   if (player.sit && player.sit.bench) { hud.setPrompt('Stand up'); nearest = null; return; }
   let best = null, bd = 1e9;
   for (const it of interactables) {
@@ -412,12 +449,18 @@ function updateInteraction() {
       if (score < bd) { best = it; bd = score; }
     }
   }
+  if (veh && !player.sit && !player.fly) {
+    const c = veh.nearestParked(player.x, player.z, player.y);
+    if (c && (!best || Math.hypot(c.x - player.x, c.z - player.z) < bd)) best = { type: 'car', car: c, label: 'Drive the ' + VEHICLE_NAMES[c.type] };
+  }
   nearest = best;
   hud.setPrompt(best ? (best.labels ? best.labels[doorOpen.get(best.door) ? 1 : 0] : best.dyn ? best.dyn() : best.label) : null, best && best.soon);
 }
 function interact() {
+  if (driving()) { leaveCar(); return; }
   if (player.sit && player.sit.bench) { stopEmote(); return; }
   if (!nearest) return;
+  if (nearest.type === 'car') { enterCar(nearest.car); return; }
   if (nearest.type === 'sit') sitOn(nearest);
   else if (nearest.type === 'door') setDoorOpen(nearest.door, !doorOpen.get(nearest.door), true);
   else if (nearest.type === 'npc') {
@@ -567,6 +610,7 @@ function travelTo(id) {
   if (CITY) {   // same world: the auto drives you across town
     $('tbox').innerHTML = `<h2>${ZONE_BY_ID[id].icon} Off to ${ZONE_BY_ID[id].short}...</h2><div class="sub">Hold on tight. Tr-r-r-ring!</div>`;
     setTimeout(() => {
+      if (driving()) leaveCar();
       const pt = parts.find((q) => q.id === id), sp = pt.plan.spawn;
       player.x = sp.x; player.z = sp.z; player.yaw = sp.yaw; player.y = ground(sp.x, sp.z); player.vy = 0;
       if (vegetation) vegetation.update(player.x, player.z);
@@ -617,7 +661,7 @@ function addOther(p) {
   av.group.rotation.y = p.ry || 0;
   av.group.visible = !!p.hasPos;
   scene.add(av.group);
-  others.set(p.id, { ...av, name: p.name, tx: p.x, ty: p.y, tz: p.z, tr: p.ry || 0, em: p.em === 10 ? 3 : p.em || 0, bench: p.em === 10, seen: !!p.hasPos });
+  others.set(p.id, { ...av, name: p.name, tx: p.x, ty: p.y, tz: p.z, tr: p.ry || 0, em: p.em === 10 ? 3 : p.em || 0, bench: p.em === 10, seen: !!p.hasPos, vid: p.veh | 0, vcol: p.vc | 0, rv: null });
   hud.setOnline(others.size + 1);
 }
 function setOtherAvatar(id, cfg) {
@@ -627,11 +671,12 @@ function setOtherAvatar(id, cfg) {
   av.group.position.copy(o.group.position); av.group.rotation.copy(o.group.rotation); av.group.visible = o.group.visible;
   scene.add(av.group);
   disposeAvatar(o);
-  others.set(id, { ...av, name: o.name, tx: o.tx, ty: o.ty, tz: o.tz, tr: o.tr, em: o.em, bench: o.bench, seen: o.seen });
+  others.set(id, { ...av, name: o.name, tx: o.tx, ty: o.ty, tz: o.tz, tr: o.tr, em: o.em, bench: o.bench, seen: o.seen, vid: o.vid, vcol: o.vcol, rv: o.rv });
 }
 function removeOther(id) {
   const o = others.get(id);
   if (!o) return;
+  if (o.rv && veh) veh.disposeRemote(o.rv);
   disposeAvatar(o);
   others.delete(id);
   hud.setOnline(others.size + 1);
@@ -645,6 +690,11 @@ function updateOthers(dt, t) {
     g.position.y += (o.ty - g.position.y) * k;
     g.position.z += (o.tz - g.position.z) * k;
     g.rotation.y = lerpAngle(g.rotation.y, o.tr, k);
+    // someone driving: show their vehicle instead of the avatar
+    if (veh && o.vid && (!o.rv || o.rv.id !== o.vid + ':' + o.vcol)) { if (o.rv) veh.disposeRemote(o.rv); o.rv = veh.makeRemote(o.vid, o.vcol); if (o.rv) { o.rv.id = o.vid + ':' + o.vcol; scene.add(o.rv.group); } }
+    else if (o.rv && !o.vid) { veh.disposeRemote(o.rv); o.rv = null; }
+    if (o.rv) { o.rv.group.visible = o.seen; g.visible = false; veh.animateRemote(o.rv, g.position.x, g.position.y, g.position.z, g.rotation.y, dt); continue; }
+    if (o.seen) g.visible = true;
     animateAvatar(o, { moved: Math.hypot(g.position.x - px, g.position.z - pz), dt, emote: o.em, t, swim: o.ty < -0.6, sitKind: o.bench ? 'bench' : 'ground' });
   }
 }
@@ -710,7 +760,7 @@ $('btnChat').addEventListener('touchstart', (e) => { e.preventDefault(); hud.isC
 $('chatHint').addEventListener('click', () => { if (ready) openChat(); });
 
 // ======================= input =======================
-const toggleFly = () => { if (player.sit) return; player.fly = !player.fly; player.vy = 0; if (!player.fly) pushOut(); };
+const toggleFly = () => { if (player.sit || driving()) return; player.fly = !player.fly; player.vy = 0; if (!player.fly) pushOut(); };
 const toggleView = () => { thirdPerson = !thirdPerson; };
 
 playBtn.addEventListener('click', () => {
@@ -735,6 +785,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyF') toggleFly();
   if (e.code === 'KeyV') toggleView();
   if (e.code === 'KeyE') interact();
+  if (e.code === 'KeyL' && driving()) hud.toast(veh.toggleLights() ? 'Headlights on' : 'Headlights off');
   if (e.code === 'KeyM') hud.toggleMap();
   if (e.code === 'KeyC') customizer.open();
   if (e.code === 'KeyK') cycleWeather();
@@ -751,7 +802,7 @@ addEventListener('keyup', (e) => { keys[e.code] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 document.addEventListener('mousemove', (e) => {
   if (!locked) return;
-  player.yaw -= e.movementX * 0.0022;
+  player.yaw -= e.movementX * 0.0022; lastLookAt = performance.now();
   player.pitch = Math.max(-1.5, Math.min(1.5, player.pitch - e.movementY * 0.0022));
 });
 document.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -779,7 +830,7 @@ if (isTouch) {
         touch.mx = dx; touch.my = dy;
         knob.style.transform = `translate(${dx * 40}px, ${dy * 40}px)`;
       } else if (t.identifier === lookId) {
-        player.yaw -= (t.clientX - lastLook.x) * 0.006;
+        player.yaw -= (t.clientX - lastLook.x) * 0.006; lastLookAt = performance.now();
         player.pitch = Math.max(-1.5, Math.min(1.5, player.pitch - (t.clientY - lastLook.y) * 0.006));
         lastLook = { x: t.clientX, y: t.clientY };
       }
@@ -840,10 +891,10 @@ function connect() {
   });
   socket.on('playerJoined', (p) => { addOther(p); hud.addChat(null, `${p.name} joined`); });
   socket.on('playerLeft', (id) => { voice.removePeer(id); const o = others.get(id); if (o) hud.addChat(null, `${o.name} left`); removeOther(id); });
-  socket.on('playerMoved', ({ id, x, y, z, ry, em }) => {
+  socket.on('playerMoved', ({ id, x, y, z, ry, em, veh: vid, vc }) => {
     const o = others.get(id);
     if (!o) return;
-    o.tx = x; o.ty = y; o.tz = z; o.tr = ry; o.em = em === 10 ? 3 : em || 0; o.bench = em === 10;
+    o.tx = x; o.ty = y; o.tz = z; o.tr = ry; o.em = em === 10 ? 3 : em || 0; o.bench = em === 10; o.vid = vid | 0; o.vcol = vc | 0;
     if (!o.seen) { o.seen = true; o.group.visible = true; o.group.position.set(x, y, z); o.group.rotation.y = ry; }
   });
   socket.on('playerAvatar', ({ id, avatar }) => setOtherAvatar(id, avatar));
@@ -854,10 +905,11 @@ function sendPosition(now, force) {
   if (!socket || !socket.connected) return;
   if (!force && now - lastSent < 50) return;
   const em = player.sit && player.sit.bench ? 10 : player.emote; // 10 = seated on a bench
-  const st = `${player.x.toFixed(2)},${player.y.toFixed(2)},${player.z.toFixed(2)},${player.yaw.toFixed(2)},${em}`;
+  const vc = driving() ? veh.cur : null, vid = vc ? TYPE_ID[vc.type] : 0, vcol = vc ? vc.hex : 0;
+  const st = `${player.x.toFixed(2)},${player.y.toFixed(2)},${player.z.toFixed(2)},${(vc ? vc.yaw : player.yaw).toFixed(2)},${em},${vid},${vcol}`;
   if (!force && st === lastState) return;
   lastState = st; lastSent = now;
-  socket.emit('move', { x: player.x, y: player.y, z: player.z, ry: player.yaw, em });
+  socket.emit('move', { x: player.x, y: player.y, z: player.z, ry: vc ? vc.yaw : player.yaw, em, veh: vid, vc: vcol });
 }
 
 // ======================= main loop =======================
@@ -872,7 +924,8 @@ function frame(now) {
 
   if (ready) {
     const px = player.x, pz = player.z;
-    if (active()) { updatePlayer(dt, now); updateInteraction(); } else if (!hud.isChatOpen()) hud.setPrompt(null);
+    if (active()) { if (driving()) updateDrive(dt); else updatePlayer(dt, now); updateInteraction(); } else if (!hud.isChatOpen()) hud.setPrompt(null);
+    if (veh) veh.update(dt, player.x, player.z, ts.night, audio.isOn());
     sendPosition(now, false);
     updateOthers(dt, t);
     indoors = isIndoors(player.x, player.z, player.y);
@@ -881,7 +934,7 @@ function frame(now) {
     if (selfAvatar) {
       selfAvatar.group.position.set(player.x, player.y, player.z);
       selfAvatar.group.rotation.y = player.yaw;
-      selfAvatar.group.visible = thirdPerson && !indoors;
+      selfAvatar.group.visible = thirdPerson && !indoors && !driving();
       const swimSelf = !player.fly && !player.sit && ground(player.x, player.z, player.y) < -1.0;
       animateAvatar(selfAvatar, {
         moved: Math.hypot(player.x - px, player.z - pz), dt, emote: player.emote, t, swim: swimSelf,
@@ -893,7 +946,16 @@ function frame(now) {
     _eye.set(player.x, player.y + 1.62 - eyeDrop, player.z);
     camera.rotation.set(player.pitch, player.yaw, 0);
     camera.position.copy(_eye);
-    if (thirdPerson && !indoors) { // (rooms are too small for the follow camera: you see through your own eyes indoors)
+    const dr = driving() ? veh.cur : null;
+    if (dr) {   // chase camera behind the car
+      const dist = dr.spec.camDist * (thirdPerson ? 1 : 0.68), cp = Math.cos(player.pitch), tx0 = dr.x, ty0 = dr.y + 1.25, tz0 = dr.z;
+      camera.position.set(tx0 + Math.sin(player.yaw) * dist * cp, ty0 + 1.0 + dist * (0.12 + Math.sin(player.pitch) * 0.9), tz0 + Math.cos(player.yaw) * dist * cp);
+      camera.position.y = Math.max(camera.position.y, ground(camera.position.x, camera.position.z, dr.y) + 0.6);
+      camera.lookAt(tx0 - Math.sin(player.yaw) * 2.5, ty0 + 0.1, tz0 - Math.cos(player.yaw) * 2.5);
+      const fov = BASE_FOV + Math.min(14, Math.abs(dr.v) * 0.5); if (Math.abs(fov - camera.fov) > 0.25) { camera.fov += (fov - camera.fov) * 0.1; camera.updateProjectionMatrix(); }
+      if (speedoEl) { speedoEl.style.display = 'block'; speedoEl.textContent = Math.round(Math.abs(dr.v) * 3.6) + ' km/h · ' + dr.m.spec.name; }
+    } else if (speedoEl && speedoEl.style.display !== 'none') { speedoEl.style.display = 'none'; camera.fov = BASE_FOV; camera.updateProjectionMatrix(); }
+    if (thirdPerson && !indoors && !dr) { // (rooms are too small for the follow camera: you see through your own eyes indoors)
       _dir.set(-Math.sin(player.yaw) * Math.cos(player.pitch), Math.sin(player.pitch), -Math.cos(player.yaw) * Math.cos(player.pitch));
       camera.position.addScaledVector(_dir, -4.2);
       camera.position.y += 0.5;
@@ -922,7 +984,7 @@ function frame(now) {
     if (frameNo % 90 === 5) refreshQuest();
     if (frameNo % 240 === 17) collectEnvMats();
     beacon.update(t, 1 - ts.night);
-    if (frameNo % 30 === 7 && !player.fly && !player.sit) pushOut();
+    if (frameNo % 30 === 7 && !player.fly && !player.sit && !driving()) pushOut();
     if (!isTouch || frameNo % 2 === 0) hud.drawMinimap(player, [...others.values()].filter((o) => o.seen).map((o) => ({ x: o.group.position.x, z: o.group.position.z })), objNow);
   }
   for (const tw of towns) tw.update(t, waveHeight);
@@ -997,6 +1059,7 @@ async function boot() {
   plan.boxes.forEach(addBoxCollider);
   plan.circles.forEach((c) => addCollider(c.x, c.z, c.r, c.y0, c.y1));
   buildNpcs();
+  buildVehicles();
   interactables = plan.interactables;
   glow = createLightGlow(THREE, CITY ? parts.flatMap((pt) => collectLights(pt.plan)) : collectLights(plan), { lite: LITE }); scene.add(glow.group);
   collectEnvMats();
@@ -1008,6 +1071,6 @@ async function boot() {
   statusEl.textContent = 'Connecting to server...'; await nextFrame();
   connect();
 }
-window.__vw = { scene, camera, renderer, player, keys, hud, voice, setDoorOpen, doorOpen, get indoors() { return indoors; }, npcs, wx, setWeather: (m) => { weatherMode = m; wxInit = false; }, setWind: (v) => { windOverride = v; }, get vegetation() { return vegetation; }, get plan() { return plan; }, ground, blocked, setEmote, interact, get nearest() { return nearest; }, get missions() { return missions; }, ZONE, CITY, parts, areaAt, openTravel, travelTo, get travelOpen() { return travelOpen; }, get ts() { return ts; }, get hour() { return curHour; }, setTime: (h) => { todOverride = h; }, showLines, checkSpots, get glow() { return glow; }, get beacon() { return beacon; }, toggleJournal };
+window.__vw = { get veh() { return veh; }, enterCar, leaveCar, driving, scene, camera, renderer, player, keys, hud, voice, setDoorOpen, doorOpen, get indoors() { return indoors; }, npcs, wx, setWeather: (m) => { weatherMode = m; wxInit = false; }, setWind: (v) => { windOverride = v; }, get vegetation() { return vegetation; }, get plan() { return plan; }, ground, blocked, setEmote, interact, get nearest() { return nearest; }, get missions() { return missions; }, ZONE, CITY, parts, areaAt, openTravel, travelTo, get travelOpen() { return travelOpen; }, get ts() { return ts; }, get hour() { return curHour; }, setTime: (h) => { todOverride = h; }, showLines, checkSpots, get glow() { return glow; }, get beacon() { return beacon; }, toggleJournal };
 requestAnimationFrame(frame);
 boot().catch((e) => { statusEl.textContent = 'Error: ' + e.message; console.error(e); });

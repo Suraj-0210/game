@@ -38,3 +38,16 @@ the game falls back to the hand-drawn layout of that area. The places to discove
 Only areas near you are drawn. Each area has 4 places to discover for XP.
 `?zone=<id>` (e.g. `?zone=patia`) still opens one area on its own, for testing.
 Tests: `node tools/test_city.mjs`, `node tools/test_zones.mjs`, `node tools/test_missions.mjs`.
+
+## Cars and driving
+
+Six detailed vehicles are built in code (no model files): hatchback, sedan, SUV, auto-rickshaw, city bus and truck, with glass, mirrors,
+door lines, lamps, grille and spinning wheels (`public/bbsr_vehicles_kit.js`). Parked cars stand along the real roads (never at junctions)
+and traffic keeps to the left on them (`public/bbsr_vehicles.js`); everything far away is drawn as instanced meshes.
+
+- Stand next to a parked car and press **E** (or tap the prompt on a phone) to get in. **W/S** gas and brake/reverse, **A/D** steer,
+  **Space** handbrake, **Shift** boost, **H** horn, **L** headlights (they also come on at night), **V** near/far camera, **E** to get out.
+  On a phone the stick drives, Jump is the handbrake and Run is the boost.
+- The car follows ramps, flyovers and the Khandagiri hill, stops at walls, buildings and other vehicles, and the traffic brakes for you.
+- Other players see your car (kind and colour travel with the normal `move` message).
+- Test without a browser: `node tools/test_vehicles.mjs`. Preview the models: open `/vehicles_showcase.html?all=1` (or `?k=sedan&v=side`).

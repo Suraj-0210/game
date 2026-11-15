@@ -1,0 +1,25 @@
+<!doctype html><meta charset="utf-8"><title>Vehicles</title>
+<style>html,body{margin:0;background:#9fb8cc;overflow:hidden}</style>
+<script type="importmap">{ "imports": { "three": "/three/build/three.module.js", "three/addons/": "/three/examples/jsm/" } }</script>
+<script type="module">
+import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { createKit, PAINTS } from './bbsr_vehicles_kit.js';
+const q = new URLSearchParams(location.search);
+const r = new THREE.WebGLRenderer({ antialias: true }); r.setSize(innerWidth, innerHeight); r.shadowMap.enabled = true; document.body.appendChild(r.domElement);
+const sc = new THREE.Scene(); sc.background = new THREE.Color(0x9fb8cc);
+sc.add(new THREE.HemisphereLight(0xdfeeff, 0x555044, 1.4));
+const sun = new THREE.DirectionalLight(0xfff2dd, 2.4); sun.position.set(-8, 14, 10); sun.castShadow = true; sc.add(sun);
+const gnd = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: 0x3b3d40 })); gnd.rotation.x = -Math.PI / 2; gnd.receiveShadow = true; sc.add(gnd);
+const kit = createKit(THREE, mergeGeometries);
+const keys = (q.get('k') || 'hatch,sedan,suv,auto,bus,truck').split(',');
+let x = 0; const gs = [];
+keys.forEach((k, i) => { const g = kit.buildGroup(k, PAINTS[(i * 3 + 3) % PAINTS.length]); g.position.x = x; x += 7 + (k === 'bus' ? 6 : 0); sc.add(g); gs.push(g); });
+const cam = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 300);
+const view = q.get('v') || 'front3q', tgt = gs[+q.get('i') || 0];
+const p = tgt.position, d = +q.get('d') || 7;
+const ang = { front3q: [-0.9, 0.35], side: [-Math.PI / 2, 0.08], rear3q: [0.9 + Math.PI, 0.35], top: [0, 1.4] }[view];
+if (q.get('all')) { cam.position.set(x / 2, 9, 22 + x * 0.35); cam.lookAt(x / 2, 1, 0); }
+else { cam.position.set(p.x + Math.sin(ang[0]) * d, 1 + Math.sin(ang[1]) * d, p.z - Math.cos(ang[0]) * d); cam.lookAt(p.x, 1, p.z); }
+r.render(sc, cam); window.done = true;
+</script>
