@@ -2,13 +2,13 @@
 // Run: node tools/test_city.mjs
 import { buildPlan } from '../public/bbsr_plan.js';
 import { ZONES, buildZonePlan } from '../public/bbsr_zones.js';
-import { LAYOUT, LINKS, BOUNDS, HALF_TILE, offsetPlan, areaAt } from '../public/bbsr_city.js';
+import { LAYOUT, LINKS, BOUNDS, HALF_TILE, offsetPlan, areaAt, edgeExits, computeLinks } from '../public/bbsr_city.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 const realFile = (id) => { try { return JSON.parse(fs.readFileSync(new URL(`../public/data/real_${id}.json`, import.meta.url), 'utf8')); } catch (e) { return null; } };
 
 const PR = 0.4, parts = [];
-for (const z of ZONES) { const p = z.id === 'oldtown' ? buildPlan(realFile('oldtown') || JSON.parse(fs.readFileSync(new URL('../public/data/oldtown_osm.json', import.meta.url), 'utf8'))) : buildZonePlan(z.id, realFile(z.id)); const [ox, oz] = LAYOUT[z.id]; offsetPlan(p, ox, oz); parts.push({ id: z.id, ox, oz, plan: p }); }
+for (const z of ZONES) { const p = z.id === 'oldtown' ? buildPlan(realFile('oldtown') || JSON.parse(fs.readFileSync(new URL('../public/data/oldtown_osm.json', import.meta.url), 'utf8'))) : buildZonePlan(z.id, realFile(z.id)); const [ox, oz] = LAYOUT[z.id]; const exits = edgeExits(p); offsetPlan(p, ox, oz); parts.push({ id: z.id, ox, oz, plan: p, exits }); }
 // no two areas overlap, and all links join areas that share an edge
 const ids = Object.keys(LAYOUT);
 for (const a of ids) for (const b of ids) if (a < b) { const [ax, az] = LAYOUT[a], [bx, bz] = LAYOUT[b]; assert.ok(Math.abs(ax - bx) > 2 * HALF_TILE || Math.abs(az - bz) > 2 * HALF_TILE, `${a} overlaps ${b}`); }
@@ -48,15 +48,20 @@ for (const pt of parts) for (const f of pt.plan.flyovers || []) {
 }
 console.log('flyovers walkable:', nfly);
 let bad = 0;
-for (const [a, b] of LINKS) {
-  const [ax, az] = LAYOUT[a], [bx, bz] = LAYOUT[b], h = az === bz;
-  const x0 = h ? Math.min(ax, bx) + HALF_TILE - 40 : ax, x1 = h ? Math.max(ax, bx) - HALF_TILE + 40 : bx, z0 = h ? az : Math.min(az, bz) + HALF_TILE - 40, z1 = h ? bz : Math.max(az, bz) - HALF_TILE + 40;
-  let blockedAt = [];
-  for (let t = 0; t <= 1; t += 0.004) for (const off of [-6, -3, 0, 3, 6]) {
-    const x = x0 + (x1 - x0) * t + (h ? 0 : off), z = z0 + (z1 - z0) * t + (h ? off : 0);
-    if (solid(x, z)) blockedAt.push([Math.round(x), Math.round(z)]);
+const links = computeLinks(parts);
+console.log('connector roads:', links.length, 'between', LINKS.length, 'pairs of areas');
+for (const [a, b] of LINKS) assert.ok(links.some((l) => l.from === a && l.to === b), `no road between ${a} and ${b}`);
+for (const lk of links) {
+  let blockedAt = [], len = 0;
+  for (let i = 0; i + 1 < lk.pts.length; i++) {
+    const [ax, az] = lk.pts[i], [bx, bz] = lk.pts[i + 1], L = Math.hypot(bx - ax, bz - az), nx = -(bz - az) / L, nz = (bx - ax) / L;
+    len += L;
+    for (let s = 0; s <= L; s += 2) for (const off of [-lk.w / 2 + 1.5, 0, lk.w / 2 - 1.5]) {
+      const x = ax + ((bx - ax) * s) / L + nx * off, z = az + ((bz - az) * s) / L + nz * off;
+      if (solid(x, z)) blockedAt.push([Math.round(x), Math.round(z)]);
+    }
   }
-  console.log(`${a} - ${b}: ${blockedAt.length ? 'BLOCKED at ' + JSON.stringify(blockedAt.slice(0, 4)) : 'clear'}`);
+  console.log(`${lk.from} - ${lk.to}: ${Math.round(len)} m, width ${lk.w}: ${blockedAt.length ? 'BLOCKED at ' + JSON.stringify(blockedAt.slice(0, 4)) + ' (' + blockedAt.length + ' points)' : 'clear'}`);
   bad += blockedAt.length ? 1 : 0;
 }
 console.log('bounds', JSON.stringify(BOUNDS));

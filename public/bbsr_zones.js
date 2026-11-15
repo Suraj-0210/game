@@ -2,6 +2,7 @@
 // Pure data and layout (no graphics), so it can be tested in Node. Street lines and building positions are hand-drawn APPROXIMATIONS:
 // the real places and their rough character are right, the exact geometry is not surveyed.
 import { WORLD, EDGE } from './bbsr_plan.js';
+import { edgeExits } from './bbsr_city.js';
 
 export const ZONES = [
   { id: 'oldtown', room: 'bbsr', name: 'Old Town · Ekamra Kshetra', short: 'Old Town', icon: '\u{1F6D5}', km: 0, blurb: 'Lingaraja Temple, Bindusagar tank, Tala Bazaar' },
@@ -523,8 +524,9 @@ function realBuild(plan, H, id, real) {
     }
     return best;
   };
-  const stubs = [];
-  for (const [mx, mz] of [[0, -EDGE], [0, EDGE], [-EDGE, 0], [EDGE, 0]]) {
+  const stubs = [], exits = edgeExits(plan);
+  for (const [mx, mz, side] of [[0, -EDGE, 'n'], [0, EDGE, 's'], [-EDGE, 0, 'w'], [EDGE, 0, 'e']]) {
+    if (exits[side].some((q) => Math.hypot(q.x - mx, q.z - mz) < 130)) continue;     // a real main road already leaves near the middle of this edge
     const np = nearestPoint(mx, mz);
     if (np && np.d > 6) { H.road('Connector', 15, true, [[mx, mz], [np.x, np.z]]); stubs.push([mx, mz, np.x, np.z]); }
   }

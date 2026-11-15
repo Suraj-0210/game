@@ -134,7 +134,8 @@ export function createHUD({ isTouch, onEmote, onInteract, onChatSubmit }) {
     ctx.imageSmoothingEnabled = true;
     if (tiles) {
       ctx.lineCap = 'butt'; ctx.strokeStyle = '#7c7a76';
-      for (const r of cityRoads) { ctx.lineWidth = Math.max(2, r.w * scale); ctx.beginPath(); ctx.moveTo((r.x0 - ox) * scale, (r.z0 - oz) * scale); ctx.lineTo((r.x1 - ox) * scale, (r.z1 - oz) * scale); ctx.stroke(); }
+      ctx.lineJoin = 'round';
+      for (const r of cityRoads) { ctx.lineWidth = Math.max(2, r.w * scale); ctx.beginPath(); r.pts.forEach(([x, z], i) => (i ? ctx.lineTo((x - ox) * scale, (z - oz) * scale) : ctx.moveTo((x - ox) * scale, (z - oz) * scale))); ctx.stroke(); }
       for (const t of tiles) {
         const dx = (t.ox - 500 - ox) * scale, dy = (t.oz - 500 - oz) * scale, sz = 1000 * scale;
         if (dx > px || dy > px || dx + sz < 0 || dy + sz < 0) continue;

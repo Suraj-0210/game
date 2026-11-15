@@ -9,7 +9,7 @@ import { createMissions, spotsFromPlan, ITEMS, SPOT_LABELS, QUEST_LIST, isNight 
 import { buildCity } from './bbsr_mesh.js';
 import { ZONES, ZONE_BY_ID, zoneId, zoneRoom, buildZonePlan } from './bbsr_zones.js';
 import { buildZoneExtras } from './bbsr_zone_mesh.js';
-import { LAYOUT, BOUNDS, inBounds, areaAt, distToArea, offsetPlan, buildConnectors } from './bbsr_city.js';
+import { LAYOUT, BOUNDS, inBounds, areaAt, distToArea, offsetPlan, buildConnectors, edgeExits, computeLinks } from './bbsr_city.js';
 import { makeCityTextures } from './bbsr_tex.js';
 import { makeTextures } from './textures.js';
 import { createHUD } from './hud.js';
@@ -955,14 +955,14 @@ async function buildCityWorld(osm) {
     tw.group.position.set(ox, 0, oz);
     scene.add(tw.group);
     towns.push(tw);
-    parts.push({ id: z.id, ox, oz, plan: p, town: tw, map: tw.mapCanvas() });
+    parts.push({ id: z.id, ox, oz, plan: p, town: tw, map: tw.mapCanvas(), exits: edgeExits(p) });
   }
   // one big ground, and the roads that join the areas
   const M0 = towns[0].mats.M, W = BOUNDS.x1 - BOUNDS.x0, D = BOUNDS.z1 - BOUNDS.z0;
   const g = new THREE.PlaneGeometry(W, D).rotateX(-Math.PI / 2), uv = g.attributes.uv;
   for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (W / 8), uv.getY(i) * (D / 8));
   const gnd = new THREE.Mesh(g, M0.ground); gnd.position.set((BOUNDS.x0 + BOUNDS.x1) / 2, -0.02, (BOUNDS.z0 + BOUNDS.z1) / 2); gnd.receiveShadow = true; scene.add(gnd);
-  const conn = buildConnectors(THREE, M0); scene.add(conn.group);
+  const conn = buildConnectors(THREE, M0, computeLinks(parts)); scene.add(conn.group);
   parts.forEach((pt) => offsetPlan(pt.plan, pt.ox, pt.oz));      // gameplay data moves into world coordinates (meshes already sit in place)
   const cat = (k) => parts.flatMap((pt) => pt.plan[k] || []), old = parts[0].plan;
   const hz = parts.filter((pt) => pt.plan.height);

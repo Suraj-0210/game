@@ -55,20 +55,61 @@ export function offsetPlan(plan, ox, oz) {
   return plan;
 }
 
-// The connector roads (and a short marked centre line) between neighbouring areas.
-export function buildConnectors(THREE, M, { width = 15 } = {}) {
-  const road = new Batch(THREE), marks = new Batch(THREE), links = [];
-  const group = new THREE.Group();
+// Where the main roads of an area leave it (local coordinates, before the area is moved into the city): {n,s,w,e: [{x,z,w}]}
+export function edgeExits(plan) {
+  const ex = { n: [], s: [], w: [], e: [] }, E = 455;
+  const add = (side, p, w) => { const lat = side === 'n' || side === 's' ? p[0] : p[1]; if (!ex[side].some((q) => Math.abs((side === 'n' || side === 's' ? q.x : q.z) - lat) < 18)) ex[side].push({ x: p[0], z: p[1], w }); };
+  for (const r of plan.roads) {
+    if (!r.main || r.w < 9 || r.name === 'Connector') continue;
+    for (const p of [r.pts[0], r.pts[r.pts.length - 1]]) {
+      if (p[1] <= -E) add('n', p, r.w); else if (p[1] >= E) add('s', p, r.w); else if (p[0] <= -E) add('w', p, r.w); else if (p[0] >= E) add('e', p, r.w);
+    }
+  }
+  return ex;
+}
+
+// The roads between neighbouring areas. Main roads that leave one area are joined to the main road that enters the next one
+// (matched by position along the edge); if there are none, a plain road joins the middles of the two edges.
+// parts: [{ id, ox, oz, exits }]
+export function computeLinks(parts) {
+  const by = Object.fromEntries(parts.map((p) => [p.id, p])), out = [];
   for (const [a, b] of LINKS) {
-    const [ax, az] = LAYOUT[a], [bx, bz] = LAYOUT[b], horizontal = az === bz;
-    const sx = horizontal ? Math.min(ax, bx) + HALF_TILE : ax, ex = horizontal ? Math.max(ax, bx) - HALF_TILE : bx;
-    const sz = horizontal ? az : Math.min(az, bz) + HALF_TILE, ez = horizontal ? bz : Math.max(az, bz) - HALF_TILE;
-    // run a little into both areas so the road meets their edge cleanly
-    const x0 = horizontal ? sx - 14 : sx, x1 = horizontal ? ex + 14 : ex, z0 = horizontal ? sz : sz - 14, z1 = horizontal ? ez : ez + 14;
-    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, L = Math.hypot(x1 - x0, z1 - z0), yaw = horizontal ? 0 : Math.PI / 2;
-    road.flat(cx, cz, 0.03, L, width, yaw, 0xffffff, 8);
-    for (let s = 3; s < L - 3; s += 9) marks.flat(horizontal ? x0 + s : cx, horizontal ? cz : z0 + s, 0.035, horizontal ? 3.2 : 0.2, horizontal ? 0.2 : 3.2, 0, 0xeeeeee);
-    links.push({ x0, z0, x1, z1, w: width });
+    const A = by[a], B = by[b];
+    if (!A || !B) continue;
+    const h = A.oz === B.oz, sa = h ? (B.ox > A.ox ? 'e' : 'w') : (B.oz > A.oz ? 's' : 'n'), sb = { e: 'w', w: 'e', s: 'n', n: 's' }[sa];
+    const lat = (P, e) => (h ? e.z + P.oz : e.x + P.ox);
+    const pairs = [];
+    for (const ea of A.exits[sa]) for (const eb of B.exits[sb]) pairs.push({ ea, eb, d: Math.abs(lat(A, ea) - lat(B, eb)) });
+    pairs.sort((p, q) => p.d - q.d);
+    const usedA = new Set(), usedB = new Set(), picked = [];
+    for (const p of pairs) { if (p.d > 380 || usedA.has(p.ea) || usedB.has(p.eb)) continue; usedA.add(p.ea); usedB.add(p.eb); picked.push(p); if (picked.length >= 4) break; }
+    const dir = h ? [B.ox > A.ox ? 1 : -1, 0] : [0, B.oz > A.oz ? 1 : -1];
+    if (!picked.length) {
+      const mid = (P, s) => (h ? [P.ox + (s === 'e' ? HALF_TILE : -HALF_TILE), P.oz] : [P.ox, P.oz + (s === 's' ? HALF_TILE : -HALF_TILE)]);
+      const m0 = mid(A, sa), m1 = mid(B, sb);
+      out.push({ from: a, to: b, w: 15, pts: [[m0[0] - dir[0] * 14, m0[1] - dir[1] * 14], [m1[0] + dir[0] * 14, m1[1] + dir[1] * 14]] });
+      continue;
+    }
+    for (const { ea, eb } of picked) {
+      const p0 = [ea.x + A.ox, ea.z + A.oz], p1 = [eb.x + B.ox, eb.z + B.oz], lead = 40;
+      const pts = [[p0[0] - dir[0] * 12, p0[1] - dir[1] * 12], p0, [p0[0] + dir[0] * lead, p0[1] + dir[1] * lead], [p1[0] - dir[0] * lead, p1[1] - dir[1] * lead], p1, [p1[0] + dir[0] * 12, p1[1] + dir[1] * 12]];
+      out.push({ from: a, to: b, w: Math.max(ea.w, eb.w, 11), pts });
+    }
+  }
+  return out;
+}
+
+// The connector roads (and a marked centre line) between neighbouring areas.
+export function buildConnectors(THREE, M, links) {
+  const road = new Batch(THREE), marks = new Batch(THREE), group = new THREE.Group();
+  for (const lk of links) {
+    for (let i = 0; i + 1 < lk.pts.length; i++) {
+      const [ax, az] = lk.pts[i], [bx, bz] = lk.pts[i + 1], L = Math.hypot(bx - ax, bz - az), yaw = Math.atan2(-(bz - az), bx - ax);
+      if (L < 0.5) continue;
+      road.flat((ax + bx) / 2, (az + bz) / 2, 0.03, L + 0.4, lk.w, yaw, 0xffffff, 8);
+      road.flat(bx, bz, 0.03, lk.w, lk.w, yaw, 0xffffff, 8);
+      for (let s = 3; s < L - 3; s += 9) marks.flat(ax + ((bx - ax) * s) / L, az + ((bz - az) * s) / L, 0.035, 3.2, 0.2, yaw, 0xeeeeee);
+    }
   }
   group.add(road.mesh(M.asphalt, false)); group.add(marks.mesh(M.marks, false));
   return { group, links };
