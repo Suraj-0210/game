@@ -149,7 +149,22 @@ function blocked(x, z, pr, py) {
 }
 // Walking surface: natural terrain, or a town deck if one is higher
 // refY (your feet height) picks the right hotel floor: an upper floor never pulls you up from below
-function ground(x, z) { return plan && plan.height ? plan.height(x, z) : 0; }   // flat everywhere except the Khandagiri hill
+// Walking surface: natural terrain (flat except the Khandagiri hill), or the top of a flyover if your feet are at deck height.
+// refY is your feet height: walk up a ramp and the deck carries you; stand below it and the ground stays at the ground.
+function deckAt(f, s) { return s < f.ramp ? (f.h * s) / f.ramp : f.L - s < f.ramp ? (f.h * (f.L - s)) / f.ramp : f.h; }
+function ground(x, z, refY) {
+  let h = plan && plan.height ? plan.height(x, z) : 0;
+  if (refY !== undefined && plan && plan.flyovers) {
+    for (const f of plan.flyovers) {
+      const rx = x - f.x0, rz = z - f.z0, s = rx * f.dx + rz * f.dz;
+      if (s < 0 || s > f.L) continue;
+      if (Math.abs(rx * f.dz - rz * f.dx) > f.w / 2) continue;
+      const y = deckAt(f, s);
+      if (y > h && refY >= y - 0.7) h = y;
+    }
+  }
+  return h;
+}
 // Same formula as the water shader, so boats float on the visible waves
 let waveAmp = 1;
 const waveHeight = (x, z, t) => waveAmp * (Math.sin(x * 0.045 + t * 0.9) * 0.35 + Math.sin(z * 0.06 - t * 0.7 + x * 0.02) * 0.28 + Math.sin((x + z) * 0.11 + t * 1.4) * 0.12);
@@ -952,6 +967,7 @@ async function buildCityWorld(osm) {
   plan = {
     city: true, short: 'Bhubaneswar', name: 'Bhubaneswar', osm: old.osm, lake: old.lake, chai: old.chai, spawn: old.spawn, travel: old.travel,
     boxes: cat('boxes'), circles: cat('circles'), interactables: cat('interactables'), npcs: cat('npcs'), landmarks: cat('landmarks'), lamps: cat('lamps'), stalls: cat('stalls'), temples: cat('temples'),
+    flyovers: cat('flyovers'),
     trees: { palms: parts.flatMap((pt) => pt.plan.trees.palms), broad: parts.flatMap((pt) => pt.plan.trees.broad), pines: [], rocks: parts.flatMap((pt) => pt.plan.trees.rocks) },
     height: hz.length ? (x, z) => { for (const pt of hz) if (Math.abs(x - pt.ox) <= 500 && Math.abs(z - pt.oz) <= 500) return pt.plan.height(x - pt.ox, z - pt.oz); return 0; } : null,
   };

@@ -48,6 +48,7 @@ export function offsetPlan(plan, ox, oz) {
   for (const k of ['boxes', 'circles', 'interactables', 'npcs', 'lamps', 'stalls', 'temples', 'landmarks', 'spots', 'walls']) (plan[k] || []).forEach(mv);
   for (const k of ['palms', 'broad', 'pines', 'rocks']) ((plan.trees && plan.trees[k]) || []).forEach(mv);
   mv(plan.spawn); mv(plan.travel); mv(plan.chai);
+  for (const f of plan.flyovers || []) { f.x0 += ox; f.x1 += ox; f.z0 += oz; f.z1 += oz; f.piers.forEach(mv); }
   return plan;
 }
 

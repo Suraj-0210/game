@@ -27,13 +27,24 @@ const solid = (x, z, y = 0) => {
   for (const c of circles) if (Math.hypot(x - c.x, z - c.z) < c.r + PR && !(c.y1 < y || c.y0 > y + 1.8)) return true;
   for (const b of boxes) {
     if (Math.abs(x - b.x) > 60 || Math.abs(z - b.z) > 60) continue;
-    if (b.y0 !== undefined && b.y0 > y + 1.8) continue;
+    if ((b.y0 !== undefined && b.y0 > y + 1.8) || (b.y1 !== undefined && b.y1 < y)) continue;
     const c = Math.cos(b.theta), s = Math.sin(b.theta), dx = x - b.x, dz = z - b.z, lx = dx * c - dz * s, lz = dx * s + dz * c;
     const ex = Math.max(Math.abs(lx) - b.hw, 0), ez = Math.max(Math.abs(lz) - b.hd, 0);
     if (ex * ex + ez * ez < PR * PR) return true;
   }
   return false;
 };
+// flyovers: you can walk up the ramp, along the deck and down the other side, and walk underneath the high part
+const deckAt = (f, s) => (s < f.ramp ? (f.h * s) / f.ramp : f.L - s < f.ramp ? (f.h * (f.L - s)) / f.ramp : f.h);
+let nfly = 0;
+for (const pt of parts) for (const f of pt.plan.flyovers || []) {
+  nfly++;
+  for (let s = 0; s <= f.L; s += 0.5) for (const lat of [-3, 0, 3]) {
+    const x = f.x0 + f.dx * s - f.dz * lat, z = f.z0 + f.dz * s + f.dx * lat, y = deckAt(f, s);
+    assert.ok(!solid(x, z, y), `${pt.id}: cannot walk the flyover deck at s=${s} lat=${lat} (${Math.round(x)},${Math.round(z)}, y=${y.toFixed(1)})`);
+  }
+}
+console.log('flyovers walkable:', nfly);
 let bad = 0;
 for (const [a, b] of LINKS) {
   const [ax, az] = LAYOUT[a], [bx, bz] = LAYOUT[b], h = az === bz;

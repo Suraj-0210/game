@@ -82,7 +82,9 @@ export function buildZonePlan(id) {
     segs = [];
     for (const r of plan.roads) for (let i = 0; i + 1 < r.pts.length; i++) segs.push({ ax: r.pts[i][0], az: r.pts[i][1], bx: r.pts[i + 1][0], bz: r.pts[i + 1][1], hw: r.w / 2, main: !!r.main });
   };
+  let segsFor = -1;
   const nearestRoad = (x, z) => {
+    if (segsFor !== plan.roads.length) { reindex(); segsFor = plan.roads.length; }   // always see every road laid so far
     let best = { d: 1e9, hw: 0, main: false, tx: 1, tz: 0, px: x, pz: z };
     for (const s of segs) {
       const dx = s.bx - s.ax, dz = s.bz - s.az, l2 = dx * dx + dz * dz || 1;
@@ -100,7 +102,7 @@ export function buildZonePlan(id) {
     roundabout(cx, cz, R, name = 'Square') {
       plan.rounds.push({ x: cx, z: cz, R, r: R - 6.5 });
       H.road(name + ' ring', 9, true, H.ring(cx, cz, R));
-      plan.circles.push({ x: cx, z: cz, r: R - 6.5, y0: -2, y1: 60 });
+      plan.circles.push({ x: cx, z: cz, r: R - 6.5, y0: -2, y1: 4 });   // the island is low, so a flyover can pass over it
       ex.push({ x0: cx - R - 4, z0: cz - R - 4, x1: cx + R + 4, z1: cz + R + 4 });
     },
     tower(x, z, w, d, floors, o = {}) {
@@ -115,12 +117,15 @@ export function buildZonePlan(id) {
       const hAt = (s) => (s < ramp ? (h * s) / ramp : L - s < ramp ? (h * (L - s)) / ramp : h);
       for (let s = 2; s < L; s += 4) {
         const y = hAt(s);
-        plan.boxes.push({ x: x0 + dx * s, z: z0 + dz * s, hw: 2.1, hd: w / 2 + 0.3, theta: yaw, y0: y - 1.0, y1: y + 1.4 });
+        // the underside of the deck stops walkers below it while it is lower than a person; the top of it is a walkable surface (see ground() in bbsr.js)
+        plan.boxes.push({ x: x0 + dx * s, z: z0 + dz * s, hw: 2.1, hd: w / 2 + 0.3, theta: yaw, y0: y - 1.0, y1: y - 0.7 });
+        if (y > 0.3) for (const side of [-1, 1])    // parapet walls so you do not walk off the side by accident
+          plan.boxes.push({ x: x0 + dx * s - dz * side * (w / 2 + 0.15), z: z0 + dz * s + dx * side * (w / 2 + 0.15), hw: 2.1, hd: 0.2, theta: yaw, y0: y - 0.2, y1: y + 1.1 });
       }
       for (let s = 14; s < L - 8; s += 18) {          // a pier every 18 m wherever the deck is high enough to need one
         const y = hAt(s); if (y < 2.6) continue;
         const p = { x: x0 + dx * s, z: z0 + dz * s, h: y };
-        fo.piers.push(p); plan.circles.push({ x: p.x, z: p.z, r: 0.95, y0: 0, y1: y });
+        fo.piers.push(p); plan.circles.push({ x: p.x, z: p.z, r: 0.95, y0: 0, y1: y - 0.8 });   // stops at the deck so you can walk over the top
       }
     },
     stall(key, x, z, yaw) {
