@@ -59,7 +59,9 @@ const ROADS = [
 export function buildPlan(osm = null) {
   const rand = rng(20261113);
   // real OpenStreetMap streets and buildings (from tools/fetch_osm.mjs) replace the hand-drawn ones when there are enough of them
-  const OSM = osm && osm.roads && osm.buildings && osm.roads.length >= 5 && osm.buildings.length >= 50 ? osm : null;
+  const OSM = osm && osm.roads && osm.roads.length >= 5 ? osm : null;
+  // OpenStreetMap often maps the streets well but only a few buildings here: then the real streets are used and the houses are generated beside them
+  const OSM_B = !!(OSM && OSM.buildings && OSM.buildings.length >= 50);
   const plan = {
     roads: [], lake: LAKE, compound: COMPOUND, temples: [], houses: [], awnings: [], lamps: [], benches: [], stalls: [], autos: [],
     pave: [],          // flat stone areas {x0,z0,x1,z1}
@@ -210,7 +212,7 @@ export function buildPlan(osm = null) {
   const ROOF = [0x7d7b76, 0x6d6a66, 0x8b5a3c, 0x9a6845];
   const FLOORS = [1, 2, 2, 2, 3, 3, 3, 4];
   const cw = 15.5, ch = 13.5;
-  if (!OSM) for (let gz = -40; gz <= 40; gz++) for (let gx = -40; gx <= 40; gx++) {
+  if (!OSM_B) for (let gz = -40; gz <= 40; gz++) for (let gx = -40; gx <= 40; gx++) {
     const u = gx * cw + (rand() - 0.5) * 2.4, v = gz * ch + (rand() - 0.5) * 2.4;
     const x = u * cr - v * sr, z = u * sr + v * cr;
     const w = 8.5 + rand() * 4, d = 7.5 + rand() * 3;
