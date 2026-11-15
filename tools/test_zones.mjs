@@ -3,6 +3,8 @@
 import { buildPlan } from '../public/bbsr_plan.js';
 import { ZONES, buildZonePlan, hillHeight } from '../public/bbsr_zones.js';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const realFile = (id) => { try { return JSON.parse(fs.readFileSync(new URL(`../public/data/real_${id}.json`, import.meta.url), 'utf8')); } catch (e) { return null; } };
 
 const PR = 0.4;
 function collider(plan) {
@@ -50,11 +52,12 @@ function reach(plan, blocked) {
 
 let bad = 0;
 const check = (cond, msg) => { if (!cond) { bad++; console.log('   FAIL', msg); } };
-for (const z of ZONES) {
+for (const [z, mode] of ZONES.flatMap((q) => (q.id === 'oldtown' ? [[q, 'hand']] : [[q, 'hand'], [q, 'real']]))) {
   const t0 = Date.now();
-  const plan = z.id === 'oldtown' ? buildPlan(null) : buildZonePlan(z.id);
+  if (mode === 'real' && !realFile(z.id)) continue;
+  const plan = z.id === 'oldtown' ? buildPlan(null) : buildZonePlan(z.id, mode === 'real' ? realFile(z.id) : null);
   const blocked = collider(plan), r = reach(plan, blocked);
-  console.log(`${z.id.padEnd(11)} roads ${String(plan.roads.length).padStart(2)} houses ${String(plan.houses.length).padStart(4)} boxes ${String(plan.boxes.length).padStart(4)} towers ${String(plan.towers?.length || 0).padStart(2)} lamps ${String(plan.lamps.length).padStart(3)} trees ${plan.trees.broad.length + plan.trees.palms.length} walkable ${(r.frac * 100).toFixed(0)}% (${Date.now() - t0} ms)`);
+  console.log(`${(z.id + (mode === 'real' ? ' (real)' : '')).padEnd(18)} roads ${String(plan.roads.length).padStart(2)} houses ${String(plan.houses.length).padStart(4)} boxes ${String(plan.boxes.length).padStart(4)} towers ${String(plan.towers?.length || 0).padStart(2)} lamps ${String(plan.lamps.length).padStart(3)} trees ${plan.trees.broad.length + plan.trees.palms.length} walkable ${(r.frac * 100).toFixed(0)}% (${Date.now() - t0} ms)`);
   check(plan.travel, 'no auto stand');
   if (plan.travel) { check(plan.interactables.some((i) => i.type === 'travel'), 'no travel interactable'); check(r.can(plan.travel.x, plan.travel.z, 3), 'auto stand not reachable'); }
   for (const s of plan.spots || []) { check(!blocked(s.x, s.z) || r.can(s.x, s.z, 4), `spot ${s.id} unreachable`); check(r.can(s.x, s.z, Math.min(6, s.r * 0.5)), `spot ${s.id} (${s.x.toFixed(0)},${s.z.toFixed(0)}) not reachable on foot`); }

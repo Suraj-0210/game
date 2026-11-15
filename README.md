@@ -32,6 +32,9 @@ All seven areas are in one world and one multiplayer room. The Old Town is at th
 Baramunda, Rasulgarh north of Baramunda, Jaydev Vihar north of the Old Town, Vani Vihar north of Jaydev Vihar and Patia / Infocity to the
 north-east. Connector roads join neighbouring areas (about 300 m each). Walk, fly, or use an AUTO STAND (press E) to jump to any area.
 Layout and helpers: `public/bbsr_city.js`. Area plans: `public/bbsr_zones.js` (and `bbsr_plan.js` for the Old Town).
+The streets, flyovers and buildings of every area are REAL (OpenStreetMap): `public/data/real_<area>.json`, made from a BBBike extract with
+`python3 tools/make_real_zones.py city.osm.gz`. The Old Town uses `public/data/oldtown_osm.json` (`tools/fetch_osm.mjs`). If a data file is missing
+the game falls back to the hand-drawn layout of that area. The places to discover are real named places (parks, bus stands, universities, flyovers).
 Only areas near you are drawn. Each area has 4 places to discover for XP.
 `?zone=<id>` (e.g. `?zone=patia`) still opens one area on its own, for testing.
 Tests: `node tools/test_city.mjs`, `node tools/test_zones.mjs`, `node tools/test_missions.mjs`.

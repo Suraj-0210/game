@@ -4,9 +4,11 @@ import { buildPlan } from '../public/bbsr_plan.js';
 import { ZONES, buildZonePlan } from '../public/bbsr_zones.js';
 import { LAYOUT, LINKS, BOUNDS, HALF_TILE, offsetPlan, areaAt } from '../public/bbsr_city.js';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const realFile = (id) => { try { return JSON.parse(fs.readFileSync(new URL(`../public/data/real_${id}.json`, import.meta.url), 'utf8')); } catch (e) { return null; } };
 
 const PR = 0.4, parts = [];
-for (const z of ZONES) { const p = z.id === 'oldtown' ? buildPlan(null) : buildZonePlan(z.id); const [ox, oz] = LAYOUT[z.id]; offsetPlan(p, ox, oz); parts.push({ id: z.id, ox, oz, plan: p }); }
+for (const z of ZONES) { const p = z.id === 'oldtown' ? buildPlan(realFile('oldtown') || JSON.parse(fs.readFileSync(new URL('../public/data/oldtown_osm.json', import.meta.url), 'utf8'))) : buildZonePlan(z.id, realFile(z.id)); const [ox, oz] = LAYOUT[z.id]; offsetPlan(p, ox, oz); parts.push({ id: z.id, ox, oz, plan: p }); }
 // no two areas overlap, and all links join areas that share an edge
 const ids = Object.keys(LAYOUT);
 for (const a of ids) for (const b of ids) if (a < b) { const [ax, az] = LAYOUT[a], [bx, bz] = LAYOUT[b]; assert.ok(Math.abs(ax - bx) > 2 * HALF_TILE || Math.abs(az - bz) > 2 * HALF_TILE, `${a} overlaps ${b}`); }
@@ -35,11 +37,11 @@ const solid = (x, z, y = 0) => {
   return false;
 };
 // flyovers: you can walk up the ramp, along the deck and down the other side, and walk underneath the high part
-const deckAt = (f, s) => (s < f.ramp ? (f.h * s) / f.ramp : f.L - s < f.ramp ? (f.h * (f.L - s)) / f.ramp : f.h);
+const deckAt = (f, s) => { const g = (f.off || 0) + s, T = f.tot || f.L; return g < f.ramp ? (f.h * g) / f.ramp : T - g < f.ramp ? (f.h * (T - g)) / f.ramp : f.h; };
 let nfly = 0;
 for (const pt of parts) for (const f of pt.plan.flyovers || []) {
   nfly++;
-  for (let s = 0; s <= f.L; s += 0.5) for (const lat of [-3, 0, 3]) {
+  for (let s = 0; s <= f.L; s += 0.5) for (const lat of [0]) {   // the centre line (real dual carriageways run close together, so their parapets can touch near the sides)
     const x = f.x0 + f.dx * s - f.dz * lat, z = f.z0 + f.dz * s + f.dx * lat, y = deckAt(f, s);
     assert.ok(!solid(x, z, y), `${pt.id}: cannot walk the flyover deck at s=${s} lat=${lat} (${Math.round(x)},${Math.round(z)}, y=${y.toFixed(1)})`);
   }

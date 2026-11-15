@@ -35,6 +35,12 @@ export function hillHeight(x, z) {
 export const hillU = (x, z) => ((x - HILL.cx) / HILL.rx) ** 2 + ((z - HILL.cz) / HILL.rz) ** 2;
 const HILL_PATH = [[0, 36], [70, 0], [-40, -45], [75, -95], [-45, -128], [0, -140]];
 export { HILL_PATH };
+// move the hill (the real one is in a different place from the hand-drawn one); the walking path follows it
+export function setHill(cx, cz, rx = HILL.rx, rz = HILL.rz) {
+  HILL.cx = cx; HILL.cz = cz; HILL.rx = rx; HILL.rz = rz;
+  const rel = [[0, 1.04], [0.29, 0.85], [-0.17, 0.55], [0.31, 0.27], [-0.19, 0.08], [0, 0]];
+  HILL_PATH.splice(0, HILL_PATH.length, ...rel.map(([u, v]) => [cx + u * rx, cz + v * rz]));
+}
 // where the rock-cut caves are on the hill face: [angle from south, how far up the slope (u)]
 const CAVES = [[-0.95, 0.62], [-0.58, 0.7], [-0.22, 0.58], [0.14, 0.74], [0.5, 0.64], [0.88, 0.7]];
 
@@ -64,8 +70,9 @@ const NPC_CFG = {
   priya: { g: 1, skin: 2, hs: 3, hc: 0, face: 1, top: 0, tc: 8, bot: 1, bc: 2, shoe: 2, acc: [0, 0, 0, 0, 0] },
 };
 
-export function buildZonePlan(id) {
-  const build = BUILD[id];
+// real: the OpenStreetMap data for this area (public/data/real_<id>.json, made by tools/make_real_zones.py). Without it the hand-drawn layout is used.
+export function buildZonePlan(id, real = null) {
+  const build = real ? (p, h) => realBuild(p, h, id, real) : BUILD[id];
   if (!build) throw new Error('unknown zone ' + id);
   const info = ZONE_BY_ID[id], rand = rng(hashStr(id));
   const plan = {
@@ -110,11 +117,12 @@ export function buildZonePlan(id) {
       plan.towers.push({ x, z, w, d, h, floors, yaw, kind: o.kind || 'glass', color: o.color });
       plan.boxes.push({ x, z, hw: w / 2, hd: d / 2, theta: yaw, y0: 0, y1: h + 2 });
     },
-    flyover(x0, z0, x1, z1, w = 9, h = 7.5, ramp = 65) {
-      const L = Math.hypot(x1 - x0, z1 - z0), dx = (x1 - x0) / L, dz = (z1 - z0) / L, yaw = Math.atan2(-dz, dx);
-      const fo = { x0, z0, x1, z1, w, h, ramp, L, dx, dz, yaw, piers: [] };
+    // off / tot: this piece starts `off` metres into a longer bridge of `tot` metres, so the ramps are only at the two ends of the whole bridge
+    flyover(x0, z0, x1, z1, w = 9, h = 7.5, ramp = 65, off = 0, tot = null) {
+      const L = Math.hypot(x1 - x0, z1 - z0), dx = (x1 - x0) / L, dz = (z1 - z0) / L, yaw = Math.atan2(-dz, dx), T = tot || L;
+      const fo = { x0, z0, x1, z1, w, h, ramp, L, dx, dz, yaw, off, tot: T, piers: [] };
       plan.flyovers.push(fo);
-      const hAt = (s) => (s < ramp ? (h * s) / ramp : L - s < ramp ? (h * (L - s)) / ramp : h);
+      const hAt = (s) => { const g = off + s; return g < ramp ? (h * g) / ramp : T - g < ramp ? (h * (T - g)) / ramp : h; };
       for (let s = 2; s < L; s += 4) {
         const y = hAt(s);
         // the underside of the deck stops walkers below it while it is lower than a person; the top of it is a walkable surface (see ground() in bbsr.js)
@@ -189,6 +197,7 @@ export function buildZonePlan(id) {
           for (let s = (spacing - acc) % spacing; s < L; s += spacing) {
             const side = Math.round(s / spacing) % 2 ? 1 : -1, off = r.w / 2 + 1.2, x = ax + tx * s - tz * off * side, z = az + tz * s + tx * off * side;
             if (Math.abs(x) > 478 || Math.abs(z) > 478 || /ring$/.test(r.name)) continue;
+            if ((Math.abs(x) < 24 && Math.abs(z) > 400) || (Math.abs(z) < 24 && Math.abs(x) > 400)) continue;   // keep the connector road corridors clear
             if (plan.rounds.some((q) => Math.hypot(x - q.x, z - q.z) < q.R + 6)) continue;
             if (plan.boxes.some((b) => Math.abs(b.x - x) < b.hw + 1 && Math.abs(b.z - z) < b.hd + 1 && Math.abs(b.theta) < 0.01 && b.y1 > 3)) continue;
             plan.lamps.push({ x, z });
@@ -242,6 +251,30 @@ export function buildZonePlan(id) {
       const cy = Math.cos(yaw), sy = Math.sin(yaw);
       for (const s of [-1, 1]) plan.boxes.push({ x: x + (s * span / 2) * cy, z: z - (s * span / 2) * sy, hw: 1.5, hd: 1.5, theta: 0, y0: 0, y1: h + 3 });   // the span runs along the arch's local x axis
     },
+    hill() {          // the Khandagiri hill: summit temple, rock-cut caves, boulders and scrub
+      const sy = hillHeight(HILL.cx, HILL.cz);
+      plan.props.push({ type: 'jain', x: HILL.cx, z: HILL.cz, y: sy });
+      plan.boxes.push({ x: HILL.cx, z: HILL.cz, hw: 6, hd: 6, theta: 0, y0: sy - 2, y1: sy + 16 });
+      plan.caves = CAVES.map(([a, u], i) => {
+        const x = HILL.cx + HILL.rx * Math.sqrt(u) * Math.sin(a), z = HILL.cz + HILL.rz * Math.sqrt(u) * Math.cos(a), g = hillHeight(x, z);
+        const nx = (2 * (x - HILL.cx)) / HILL.rx ** 2, nz = (2 * (z - HILL.cz)) / HILL.rz ** 2, l = Math.hypot(nx, nz), yaw = Math.atan2(nx / l, nz / l);
+        plan.boxes.push({ x, z, hw: 4.4, hd: 2.4, theta: yaw, y0: g - 4, y1: g + 7 });
+        return { x, z, y: g, yaw, n: i + 1 };
+      });
+      // boulders and scrub on the hill
+      for (let i = 0; i < 90; i++) {
+        const a = H.rand() * Math.PI * 2, f = Math.sqrt(0.1 + 0.9 * H.rand()) * 0.97, x = HILL.cx + HILL.rx * f * Math.cos(a), z = HILL.cz + HILL.rz * f * Math.sin(a);
+        if (plan.caves.some((c) => Math.hypot(c.x - x, c.z - z) < 14) || Math.hypot(x - HILL.cx, z - HILL.cz) < 14) continue;
+        if (HILL_PATH.some(([px, pz]) => Math.hypot(px - x, pz - z) < 12)) continue;
+        plan.trees.rocks.push({ x, y: hillHeight(x, z), z, s: 1.2 + H.rand() * 2.4, a: H.rand() * 6.28, k: H.rand() });
+      }
+      for (let i = 0; i < 70; i++) {
+        const a = H.rand() * Math.PI * 2, f = Math.sqrt(0.25 + 0.7 * H.rand()), x = HILL.cx + HILL.rx * f * Math.cos(a), z = HILL.cz + HILL.rz * f * Math.sin(a);
+        if (hillU(x, z) >= 0.98 || HILL_PATH.some(([px, pz]) => Math.hypot(px - x, pz - z) < 8) || plan.caves.some((c) => Math.hypot(c.x - x, c.z - z) < 10) || Math.hypot(x - HILL.cx, z - HILL.cz) < 12) continue;
+        const t = { x, y: hillHeight(x, z), z, s: 0.8 + H.rand() * 0.5, a: H.rand() * 6.28, k: 0.3 + H.rand() * 0.4 };
+        (H.rand() < 0.3 ? plan.trees.palms : plan.trees.broad).push(t);
+      }
+    },
     finish() {
       reindex();
     },
@@ -269,28 +302,7 @@ const BUILD = {
     plan.props.push({ type: 'fountain', x: S.x, z: S.z, r: 6 });
     H.reindex();
     // caves, summit temple
-    const sy = hillHeight(0, HILL.cz);
-    plan.props.push({ type: 'jain', x: 0, z: HILL.cz, y: sy });
-    plan.boxes.push({ x: 0, z: HILL.cz, hw: 6, hd: 6, theta: 0, y0: sy - 2, y1: sy + 16 });
-    plan.caves = CAVES.map(([a, u], i) => {
-      const x = HILL.cx + HILL.rx * Math.sqrt(u) * Math.sin(a), z = HILL.cz + HILL.rz * Math.sqrt(u) * Math.cos(a), g = hillHeight(x, z);
-      const nx = (2 * (x - HILL.cx)) / HILL.rx ** 2, nz = (2 * (z - HILL.cz)) / HILL.rz ** 2, l = Math.hypot(nx, nz), yaw = Math.atan2(nx / l, nz / l);
-      plan.boxes.push({ x, z, hw: 4.4, hd: 2.4, theta: yaw, y0: g - 4, y1: g + 7 });
-      return { x, z, y: g, yaw, n: i + 1 };
-    });
-    // boulders and scrub on the hill
-    for (let i = 0; i < 90; i++) {
-      const a = H.rand() * Math.PI * 2, f = Math.sqrt(0.1 + 0.9 * H.rand()) * 0.97, x = HILL.cx + HILL.rx * f * Math.cos(a), z = HILL.cz + HILL.rz * f * Math.sin(a);
-      if (plan.caves.some((c) => Math.hypot(c.x - x, c.z - z) < 14) || Math.hypot(x, z - HILL.cz) < 14) continue;
-      if (HILL_PATH.some(([px, pz]) => Math.hypot(px - x, pz - z) < 12)) continue;
-      plan.trees.rocks.push({ x, y: hillHeight(x, z), z, s: 1.2 + H.rand() * 2.4, a: H.rand() * 6.28, k: H.rand() });
-    }
-    for (let i = 0; i < 70; i++) {
-      const a = H.rand() * Math.PI * 2, f = Math.sqrt(0.25 + 0.7 * H.rand()), x = HILL.cx + HILL.rx * f * Math.cos(a), z = HILL.cz + HILL.rz * f * Math.sin(a);
-      if (hillU(x, z) >= 0.98 || HILL_PATH.some(([px, pz]) => Math.hypot(px - x, pz - z) < 8) || plan.caves.some((c) => Math.hypot(c.x - x, c.z - z) < 10) || Math.hypot(x, z - HILL.cz) < 12) continue;
-      const t = { x, y: hillHeight(x, z), z, s: 0.8 + H.rand() * 0.5, a: H.rand() * 6.28, k: 0.3 + H.rand() * 0.4 };
-      (H.rand() < 0.3 ? plan.trees.palms : plan.trees.broad).push(t);
-    }
+    H.hill();
     H.stall('chhena', -46, 233, 0); H.stall('chai', 46, 233, 0); H.stall('pan', -46, 267, Math.PI); H.stall('dahibara', 46, 267, Math.PI);
     H.stand(-82, 266, 0);
     H.npc('ranjan', 'Ranjan · Cave guide', 'ranjan', 14, 52, -0.4, 'Talk to Ranjan', [
@@ -462,3 +474,146 @@ const BUILD = {
     H.hoardings('Patia · Infocity');
   },
 };
+
+
+// ---------------------------------------------------------------------------------------------------
+// REAL MODE: the streets, flyovers and buildings come from OpenStreetMap; the places to discover are real named places found nearby.
+const REAL = {
+  khandagiri: { stalls: ['chhena', 'chai', 'pan', 'dahibara'], npc: ['ranjan', 'Ranjan · Cave guide', 'Talk to Ranjan', [
+    'Namaskar! Welcome to Khandagiri. The caves on these two hills were cut into the rock over two thousand years ago.',
+    'Udayagiri has the famous Hathigumpha inscription. King Kharavela of Kalinga had it carved.',
+    'Jain monks lived and meditated in these caves. There is a Jain temple at the top of Khandagiri.'] ] },
+  baramunda: { stalls: ['sweets', 'rasa', 'dahibara', 'bangles'], npc: ['gopal', 'Gopal · Bus conductor', 'Talk to Gopal', [
+    'Baramunda is the main bus terminal of Bhubaneswar. Buses leave from here for towns all over Odisha.',
+    'Cuttack, Puri, Sambalpur, Berhampur: shout the name and somebody will point you to a bus.',
+    'The NH-16 flyovers carry the highway above the crowded junctions, so buses and autos can keep moving.'] ] },
+  jaydev: { stalls: ['chai', 'pan', 'dahibara', 'chhena'], npc: ['mitu', 'Mitu · Shop manager', 'Talk to Mitu', [
+    'Jaydev Vihar! One of the busiest junctions in the city. The NH-16 flyover goes right over it.',
+    'Hotels, hospitals, shops and offices all crowd around the square.',
+    'If you want to find anyone in Bhubaneswar, tell them to meet at Jaydev Vihar square.'] ] },
+  vanivihar: { stalls: ['chai', 'pan', 'rasa', 'sweets'], npc: ['tapan', 'Tapan · University student', 'Talk to Tapan', [
+    'People say Vani Vihar and Bani Vihar both. This is the home of Utkal University.',
+    'The students gather at the chai stalls near the gate between lectures.',
+    'The flyover on NH-16 is the way to the airport and the city.'] ] },
+  rasulgarh: { stalls: ['rasa', 'sweets', 'bangles', 'flowers'], npc: ['sanjay', 'Sanjay · Factory supervisor', 'Talk to Sanjay', [
+    'Rasulgarh is where NH-16 crosses the old city road. The flyover takes the highway over the busy square.',
+    'The Industrial Estate nearby makes all kinds of things. Trucks come and go all day.',
+    'Under the flyover the junction never sleeps.'] ] },
+  patia: { stalls: ['chai', 'dahibara', 'pan', 'sweets'], npc: ['priya', 'Priya · IT employee', 'Talk to Priya', [
+    'Patia is where the IT companies and the big university campuses of Bhubaneswar are.',
+    'KIIT, the big university campus, is right here in Patia. Thousands of students walk through its gates every day.',
+    'Lunch at the stalls is a ritual. Chai, a snack, back to the desk.'] ] },
+};
+const FEAT_RANK = { 'tourism=attraction': 1, 'amenity=university': 2, 'amenity=place_of_worship': 2, 'amenity=bus_station': 2, 'shop=mall': 2, 'tourism=museum': 2, 'natural=peak': 2, 'leisure=stadium': 3, 'amenity=college': 3, 'leisure=park': 4, 'amenity=hospital': 5, 'tourism=hotel': 5, 'amenity=marketplace': 3, 'historic=monument': 2 };
+const FEAT_WORDS = { 'tourism=attraction': 'a place people come to see', 'amenity=university': 'a university campus', 'amenity=place_of_worship': 'a place of worship', 'amenity=bus_station': 'a bus stand', 'shop=mall': 'a shopping mall', 'tourism=museum': 'a museum', 'leisure=stadium': 'a sports ground', 'amenity=college': 'a college', 'leisure=park': 'a park', 'amenity=hospital': 'a hospital', 'tourism=hotel': 'a hotel', 'amenity=marketplace': 'a market', 'historic=monument': 'a monument' };
+const FEAT_KIND = { 'tourism=attraction': 'temple', 'amenity=place_of_worship': 'temple', 'amenity=bus_station': 'games', 'natural=peak': 'temple' };
+
+function realBuild(plan, H, id, real) {
+  const R = REAL[id], rand = H.rand, nearestRoad = plan.nearestRoad;
+  const dist = (a, b, c, d) => Math.hypot(a - c, b - d);
+  // ---- streets ----
+  for (const r of real.roads) H.road(r.name || 'road', r.w, !!r.main, r.pts);
+  H.reindex();
+  // the connector roads of the city arrive at the middle of each edge: join them to the nearest real street
+  const nearestPoint = (x, z) => {
+    let best = null;
+    for (const r of plan.roads) for (let i = 0; i + 1 < r.pts.length; i++) {
+      const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1, t = clamp01(((x - ax) * dx + (z - az) * dz) / l2), px = ax + dx * t, pz = az + dz * t, d = dist(x, z, px, pz);
+      if (!best || d < best.d) best = { d, x: px, z: pz };
+    }
+    return best;
+  };
+  const stubs = [];
+  for (const [mx, mz] of [[0, -EDGE], [0, EDGE], [-EDGE, 0], [EDGE, 0]]) {
+    const np = nearestPoint(mx, mz);
+    if (np && np.d > 6) { H.road('Connector', 15, true, [[mx, mz], [np.x, np.z]]); stubs.push([mx, mz, np.x, np.z]); }
+  }
+  H.reindex();
+  const inCorridor = (x, z, r) => (Math.abs(z) < 30 + r && Math.abs(x) > 410) || (Math.abs(x) < 30 + r && Math.abs(z) > 410);
+  // ---- flyovers: the real decks of the highway (ramps only at the two ends of each bridge) ----
+  for (const d of real.flyovers) {
+    const pts = d.pts, ramp = Math.min(65, d.len * 0.3);
+    let off = 0;
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const L = dist(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]);
+      if (L < 3) continue;
+      H.flyover(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], Math.max(7, d.w - 3), 7.5, ramp, off, d.len);
+      off += L;
+    }
+  }
+  // ---- the hill of Khandagiri and Udayagiri ----
+  if (id === 'khandagiri') {
+    const hf = real.features.filter((f) => /udaygiri|udayagiri|khandagiri/i.test(f.name) && /attraction|worship|cave/.test(f.cls));
+    const cx = hf.length ? hf.reduce((s, f) => s + f.x, 0) / hf.length : 0, cz = hf.length ? hf.reduce((s, f) => s + f.z, 0) / hf.length : 150;
+    setHill(Math.max(-250, Math.min(250, cx)), Math.max(-150, Math.min(250, cz)), 190, 150);
+    plan.hill = HILL; plan.height = hillHeight; plan.groundAt = hillHeight;
+    H.hill();
+  }
+  // ---- real buildings (tall ones become glass towers) ----
+  const dens = new Map();
+  for (const b of real.buildings) {
+    if (Math.abs(b.x) > 485 || Math.abs(b.z) > 485) continue;
+    const r = Math.hypot(b.w, b.d) / 2;
+    if (inCorridor(b.x, b.z, r)) continue;
+    if (plan.hill && hillU(b.x, b.z) < 1.15) continue;
+    if (nearestRoad(b.x, b.z).d < r * 0.35) continue;                                // not on a street
+    if (plan.flyovers.some((f) => { const rx = b.x - f.x0, rz = b.z - f.z0, s = rx * f.dx + rz * f.dz; return s > -r && s < f.L + r && Math.abs(rx * f.dz - rz * f.dx) < f.w / 2 + r * 0.7; })) continue;
+    if (plan.boxes.some((q) => Math.abs(q.x - b.x) < q.hw + r * 0.6 && Math.abs(q.z - b.z) < q.hd + r * 0.6)) continue;
+    const floors = b.floors > 0 ? Math.min(b.floors, 40) : FLOORS[Math.floor(rand() * FLOORS.length)];
+    const w = Math.min(b.w, 60), d = Math.min(b.d, 60);
+    const k = Math.floor(b.x / 100) * 1000 + Math.floor(b.z / 100); dens.set(k, (dens.get(k) || 0) + 1);
+    if (floors >= 8 && w > 12 && d > 12) { H.tower(b.x, b.z, w, d, floors, { yaw: b.yaw, kind: 'glass' }); continue; }
+    const hh = Math.min(floors, 7) * 3.2 + 0.5, nr = nearestRoad(b.x, b.z), shop = nr.main && nr.d < 6;
+    plan.houses.push({ x: b.x, z: b.z, w, d, h: hh, floors: Math.min(floors, 7), yaw: b.yaw, color: PAL[Math.floor(rand() * PAL.length)], roof: ROOF[Math.floor(rand() * ROOF.length)], pitched: !shop && Math.min(w, d) < 14 && rand() < 0.28, tank: rand() < 0.35 });
+    plan.boxes.push({ x: b.x, z: b.z, hw: w / 2, hd: d / 2, theta: b.yaw, y0: 0, y1: hh + 1 });
+  }
+  // ---- a place for the auto stand: open ground near the middle of the area ----
+  const findSite = (r, nx, nz, maxd) => {
+    for (let d = 0; d <= maxd; d += 6) for (let k = 0; k < Math.max(1, Math.round(d / 4)); k++) {
+      const a = (k / Math.max(1, Math.round(d / 4))) * Math.PI * 2 + d, x = nx + Math.cos(a) * d, z = nz + Math.sin(a) * d;
+      if (H.free(x, z, r) && !inCorridor(x, z, r) && !(plan.hill && hillU(x, z) < 1.4)) return [x, z];
+    }
+    return null;
+  };
+  const mid = [0, 0];
+  const st = findSite(11, mid[0], mid[1], 300) || [0, 0];
+  H.stand(st[0], st[1], 0);
+  for (const key of R.stalls) { const p = findSite(2.4, st[0], st[1] - 18, 90); if (p) H.stall(key, p[0], p[1], 0); }
+  const npcSite = findSite(1.5, st[0] - 12, st[1] + 6, 60);
+  if (npcSite) H.npc(R.npc[0], R.npc[1], R.npc[0], npcSite[0], npcSite[1], 0.3, R.npc[2], R.npc[3]);
+  // ---- real places to discover: the flyovers and the best-known named places nearby ----
+  const picked = [], far = (x, z) => picked.every((p) => dist(p.x, p.z, x, z) > 90);
+  for (const d of real.flyovers.filter((q) => q.name)) {
+    const m = d.pts[Math.floor(d.pts.length / 2)];
+    if (picked.length < 2 && !picked.some((q) => q.label === d.name) && far(m[0], m[1]) && Math.abs(m[0]) < 460 && Math.abs(m[1]) < 460) picked.push({ id: id + '_fly' + picked.length, label: d.name, x: m[0], z: m[1], r: 22, text: `${d.name}. The highway runs on a flyover above the junction; standing under it you can hear the traffic overhead.`, kind: 'town', xp: 30 });
+  }
+  const seen = new Set(), cand = real.features.filter((f) => FEAT_RANK[f.cls] && f.name && !seen.has(f.name) && seen.add(f.name)).sort((a, b) => FEAT_RANK[a.cls] - FEAT_RANK[b.cls] || (b.area || 0) - (a.area || 0));
+  for (const f of cand) {
+    if (picked.length >= 4) break;
+    if (Math.abs(f.x) > 470 || Math.abs(f.z) > 470 || !far(f.x, f.z)) continue;
+    picked.push({ id: id + '_f' + picked.length, label: f.name, x: f.x, z: f.z, r: 20, text: `${f.name}, ${FEAT_WORDS[f.cls]} in this part of Bhubaneswar.`, kind: FEAT_KIND[f.cls] || 'town', xp: 25 });
+  }
+  // not enough named places: the best-known named main roads
+  const namedRoads = []; for (const r of plan.roads) if (r.main && r.name && r.name !== 'road' && r.name !== 'Connector') { const e = namedRoads.find((q) => q.name === r.name); if (e) e.n += r.pts.length; else namedRoads.push({ name: r.name, n: r.pts.length, pts: r.pts }); }
+  namedRoads.sort((a, b) => b.n - a.n);
+  for (const r of namedRoads) {
+    if (picked.length >= 4) break;
+    for (const f of [0.5, 0.25, 0.75, 0.1, 0.9]) {
+      const p = r.pts[Math.floor(f * (r.pts.length - 1))];
+      if (p && !picked.some((q) => q.label === r.name) && far(p[0], p[1]) && Math.abs(p[0]) < 460 && Math.abs(p[1]) < 460) { picked.push({ id: id + '_r' + picked.length, label: r.name, x: p[0], z: p[1], r: 22, text: `${r.name}, one of the main roads of this part of the city.`, kind: 'town', xp: 20 }); break; }
+    }
+  }
+  // a spot must be somewhere you can actually stand: slide it to the nearest open ground
+  const openAt = (x, z) => Math.abs(x) < 470 && Math.abs(z) < 470 && !plan.boxes.some((b) => Math.abs(x - b.x) < b.hw + 2.8 && Math.abs(z - b.z) < b.hd + 2.8 && b.y1 > 1.5 && b.y0 < 1) && !(plan.hill && hillU(x, z) < 1.1);
+  for (const p of picked) {
+    if (!openAt(p.x, p.z)) {
+      let found = null;
+      for (let d = 3; d <= 70 && !found; d += 3) for (let k = 0; k < 16 && !found; k++) { const a = (k / 16) * Math.PI * 2, x = p.x + Math.cos(a) * d, z = p.z + Math.sin(a) * d; if (openAt(x, z)) found = [x, z]; }
+      if (found) { p.x = found[0]; p.z = found[1]; }
+    }
+    H.spot(p.id, p.label, p.x, p.z, p.r, p.text, p.kind, p.xp);
+  }
+  // ---- more houses where the map has none, then lamps and trees ----
+  H.scatter({ density: (x, z) => ((dens.get(Math.floor(x / 100) * 1000 + Math.floor(z / 100)) || 0) < 6 ? 0.6 : 0.1) });
+  H.lamps(32); H.trees({ fill: 60, avenue: true });
+}

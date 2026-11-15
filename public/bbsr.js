@@ -151,7 +151,7 @@ function blocked(x, z, pr, py) {
 // refY (your feet height) picks the right hotel floor: an upper floor never pulls you up from below
 // Walking surface: natural terrain (flat except the Khandagiri hill), or the top of a flyover if your feet are at deck height.
 // refY is your feet height: walk up a ramp and the deck carries you; stand below it and the ground stays at the ground.
-function deckAt(f, s) { return s < f.ramp ? (f.h * s) / f.ramp : f.L - s < f.ramp ? (f.h * (f.L - s)) / f.ramp : f.h; }
+function deckAt(f, s) { const g = (f.off || 0) + s, T = f.tot || f.L; return g < f.ramp ? (f.h * g) / f.ramp : T - g < f.ramp ? (f.h * (T - g)) / f.ramp : f.h; }
 function ground(x, z, refY) {
   let h = plan && plan.height ? plan.height(x, z) : 0;
   if (refY !== undefined && plan && plan.flyovers) {
@@ -940,11 +940,13 @@ function frame(now) {
 
 // ======================= startup =======================
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+// real streets, flyovers and buildings of an area (made from OpenStreetMap by tools/make_real_zones.py); null = use the hand-drawn layout
+async function loadReal(id) { try { const r = await fetch('/data/real_' + id + '.json'); return r.ok ? await r.json() : null; } catch (e) { return null; } }
 // ---- the connected city: build every area at its place in one world ----
 async function buildCityWorld(osm) {
   for (const z of ZONES) {
     statusEl.textContent = 'Building ' + z.name + '...'; await nextFrame();
-    const p = z.id === 'oldtown' ? buildPlan(osm) : buildZonePlan(z.id);
+    const p = z.id === 'oldtown' ? buildPlan(osm) : buildZonePlan(z.id, await loadReal(z.id));
     p.hoardings = [];                                    // the "edge of the map" signs are not needed any more
     const [ox, oz] = LAYOUT[z.id];
     const tw = buildCity({ THREE, mergeGeometries }, p, tex, { shadows: !LITE });
@@ -980,7 +982,7 @@ async function boot() {
   let osm = null;   // real OpenStreetMap streets and buildings, if tools/fetch_osm.mjs has been run
   if (ZONE === 'oldtown') { try { const r = await fetch('/data/oldtown_osm.json'); if (r.ok) osm = await r.json(); } catch (e) { /* none: use the hand-drawn layout */ } }
   if (CITY) await buildCityWorld(osm);
-  else { plan = ZONE === 'oldtown' ? buildPlan(osm) : buildZonePlan(ZONE); plan.short = ZONE_BY_ID[ZONE].short; }
+  else { plan = ZONE === 'oldtown' ? buildPlan(osm) : buildZonePlan(ZONE, await loadReal(ZONE)); plan.short = ZONE_BY_ID[ZONE].short; }
   { const c = document.createElement('div'); c.style.cssText = 'opacity:.55;font-size:11px;margin-top:6px'; c.textContent = ZONE !== 'oldtown' ? ZONE_BY_ID[ZONE].name + ': a hand-drawn approximation of the real place (landmarks right, exact street layout not surveyed).' : plan.osm ? 'Map data \u00a9 OpenStreetMap contributors' : 'Street layout: hand-drawn alpha (run tools/fetch_osm.mjs for the real OpenStreetMap streets)'; $('help').appendChild(c); }
   statusEl.textContent = 'Planting trees...'; await nextFrame();
   buildVegetation();

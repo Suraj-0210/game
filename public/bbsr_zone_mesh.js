@@ -64,7 +64,7 @@ export function buildZoneExtras({ THREE, mergeGeometries }, plan, tex, M, opts =
   if (plan.flyovers.length) {
     const deck = new Batch(THREE), piers = new Batch(THREE), marks = new Batch(THREE);
     for (const f of plan.flyovers) {
-      const hAt = (s) => (s < f.ramp ? (f.h * s) / f.ramp : f.L - s < f.ramp ? (f.h * (f.L - s)) / f.ramp : f.h);
+      const hAt = (s) => { const g = (f.off || 0) + s, T = f.tot || f.L; return g < f.ramp ? (f.h * g) / f.ramp : T - g < f.ramp ? (f.h * (T - g)) / f.ramp : f.h; };
       const px = -f.dz, pz = f.dx;
       for (let s = 0; s < f.L; s += 5) {
         const e = Math.min(f.L, s + 5), ya = hAt(s), yb = hAt(e), ax = f.x0 + f.dx * s, az = f.z0 + f.dz * s, bx = f.x0 + f.dx * e, bz = f.z0 + f.dz * e;

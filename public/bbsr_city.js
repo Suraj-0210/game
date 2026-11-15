@@ -8,20 +8,21 @@ export const GAP = 300;                   // road between two neighbouring areas
 export const PITCH = TILE + GAP;
 
 // [x, z] of each area centre (x east, z south). North is -z.
-// Laid out in the REAL order and directions (from OpenStreetMap): the Old Town is at the south end of a long north-south line.
-// Real straight-line distances from the Old Town: Baramunda 5.5 km, Khandagiri 6 km, Vani Vihar and Jaydev Vihar 6 km, Rasulgarh 7 km, Patia / Infocity 11.5 km.
-// Here the distances are squeezed to about 1.3 km per step so the whole city can be crossed in a few minutes.
+// Laid out in the REAL order and directions (from OpenStreetMap). The Old Town is at the south. About 6 km north, along the NH-16
+// flyover road, come Jaydev Vihar, Vani Vihar (Utkal University) and Rasulgarh from west to east, Baramunda and Khandagiri further
+// west, and Patia / KIIT far to the north. Real straight-line distances from the Old Town: Baramunda 5.5 km, Khandagiri 5.8 km,
+// Jaydev Vihar 6.2 km, Vani Vihar 6.5 km, Rasulgarh 7 km, Patia 10.8 km. Here they are squeezed to about 1.3 km per step.
 export const LAYOUT = {
   oldtown: [0, 0],
-  vanivihar: [0, -PITCH],          // Janpath / Sachivalaya Marg run north from the Old Town to Vani Vihar
-  jaydev: [0, -2 * PITCH],         // Jaydev Vihar square, on the NH-16 flyover corridor
-  patia: [0, -3 * PITCH],          // Nandankanan Road and Infocity Road lead north to Patia and KIIT
-  rasulgarh: [PITCH, -2 * PITCH],  // east of Jaydev Vihar, where NH-16 crosses at the Rasulgarh flyover
-  baramunda: [-PITCH, -PITCH],     // the bus stand, west of the main road
-  khandagiri: [-2 * PITCH, -PITCH],// further west, at the foot of the Khandagiri and Udayagiri hills
+  vanivihar: [0, -PITCH],           // Janpath and Sachivalaya Marg run north from the Old Town to Vani Vihar
+  jaydev: [-PITCH, -PITCH],         // west of Vani Vihar along the NH-16 flyovers
+  rasulgarh: [PITCH, -PITCH],       // east of Vani Vihar, where NH-16 crosses at the Rasulgarh flyover
+  baramunda: [-2 * PITCH, -PITCH],  // the big bus stand, further west
+  khandagiri: [-2 * PITCH, 0],      // south of Baramunda, at the foot of the Khandagiri and Udayagiri hills
+  patia: [-PITCH, -2 * PITCH],      // north of Jaydev Vihar: Patia, Infocity and KIIT
 };
 export const LINKS = [
-  ['oldtown', 'vanivihar'], ['vanivihar', 'jaydev'], ['jaydev', 'patia'], ['jaydev', 'rasulgarh'], ['vanivihar', 'baramunda'], ['baramunda', 'khandagiri'],
+  ['oldtown', 'vanivihar'], ['vanivihar', 'jaydev'], ['vanivihar', 'rasulgarh'], ['jaydev', 'baramunda'], ['baramunda', 'khandagiri'], ['jaydev', 'patia'],
 ];
 const MARGIN = 160;
 export const BOUNDS = (() => {
