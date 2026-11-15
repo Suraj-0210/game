@@ -71,7 +71,14 @@ export function buildPlan(osm = null) {
   };
 
   // ------------- roads -------------
-  if (OSM) for (const r of OSM.roads) plan.roads.push({ name: r.name || 'road', w: r.w, main: !!r.main, pts: r.pts });
+  if (OSM) for (const r of OSM.roads) {
+    // real streets, minus the stretches that would run across the tank or through the temple compound (those have their own paths)
+    const keep = ([x, z]) => lakeValue(x, z, 1.5) >= 1 && !(Math.abs(x - COMPOUND.cx) < COMPOUND.hw + 3 && Math.abs(z - COMPOUND.cz) < COMPOUND.hd + 3);
+    let run = [];
+    const flush = () => { if (run.length >= 2) plan.roads.push({ name: r.name || 'road', w: r.w, main: !!r.main, pts: run }); run = []; };
+    for (const pt of r.pts) { if (keep(pt)) run.push(pt); else flush(); }
+    flush();
+  }
   else for (const r of ROADS) plan.roads.push({ ...r });
   const ring = lakeRing(16, 96); ring.push(ring[0]);
   if (!OSM) plan.roads.push({ name: 'Tank Road', w: 8, main: true, pts: ring });
