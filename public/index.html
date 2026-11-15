@@ -182,6 +182,7 @@
     <div id="help">
       <b>Desktop:</b> <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>E</kbd> interact · <kbd>1</kbd>-<kbd>9</kbd> emotes<br>
       <kbd>V</kbd> first / third person · <kbd>M</kbd> big map · <kbd>C</kbd> avatar · <kbd>F</kbd> fly · <kbd>Enter</kbd> chat · <kbd>K</kbd> change weather · <kbd>O</kbd> sound · <kbd>G</kbd> microphone (nearby players hear you)<br>
+      <div id="build" style="opacity:.5;font-size:11px;margin-top:6px"></div>
       <b>Phone:</b> left thumb moves · drag right side to look · tap the minimap to enlarge it
     </div>
   </div>
@@ -190,6 +191,21 @@
 <script type="importmap">
 { "imports": { "three": "/three/build/three.module.js", "three/addons/": "/three/examples/jsm/" } }
 </script>
-<script type="module" src="/main.js"></script>
+<script>
+// If the game cannot start, say why on the start screen instead of staying on "Starting..."
+(function () {
+  function show(msg) { var s = document.getElementById('status'), p = document.getElementById('play'); if (s) s.textContent = msg; if (p) p.disabled = true; }
+  window.addEventListener('error', function (e) { show('Startup error: ' + (e.message || 'a game file failed to load') + (e.filename ? ' [' + e.filename.split('/').pop() + ']' : '')); });
+  window.addEventListener('unhandledrejection', function (e) { show('Startup error: ' + ((e.reason && e.reason.message) || e.reason)); });
+  window.__moduleFailed = function () { show('Startup error: a game file is missing or failed to load. Open /health to see which one.'); };
+  fetch('/health').then(function (r) { return r.json(); }).then(function (h) {
+    var b = document.getElementById('build'); if (b) b.textContent = 'server build: ' + h.build;
+    var miss = Object.keys(h.files).filter(function (k) { return h.files[k] === 'MISSING'; });
+    if (miss.length) show('Missing files on the server: ' + miss.join(', '));
+    else if (!h.threeInstalled) show('The server is missing the three.js package (npm install did not finish).');
+  }).catch(function () {});
+})();
+</script>
+<script type="module" src="/main.js" onerror="window.__moduleFailed()"></script>
 </body>
 </html>

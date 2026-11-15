@@ -69,6 +69,7 @@ export function createHUD({ isTouch, onEmote, onInteract, onChatSubmit }) {
 
   // ---------- minimap ----------
   const cv = $('minimap'), ctx = cv.getContext('2d');
+  let WS = SIZE, WH = HALF, VIEW = 520;   // world size, half-size and small-map view width in metres (the island by default)
   let base = null, landmarks = [], dpr = Math.min(window.devicePixelRatio || 1, 2);
   const sizeMap = () => {
     const css = state.bigMap ? Math.round(Math.min(innerWidth, innerHeight) * 0.82) : isTouch ? 112 : 172;
@@ -87,8 +88,10 @@ export function createHUD({ isTouch, onEmote, onInteract, onChatSubmit }) {
     }
     return RAMP[RAMP.length - 1][1];
   };
+  // A world that draws its own map (the city): a square canvas covering [-size/2, size/2] on both axes
+  const initMinimapImage = (canvas, size, lms) => { base = canvas; WS = size; WH = size / 2; VIEW = 360; landmarks = lms; };
   const initMinimap = (terrain, lms) => {
-    landmarks = lms;
+    landmarks = lms; WS = SIZE; WH = HALF; VIEW = 520;
     const N = 512, c = document.createElement('canvas'); c.width = c.height = N;
     const g = c.getContext('2d'), img = g.createImageData(N, N), n = terrain.n, step = terrain.step;
     const L = [-0.45, 0.78, -0.43], ll = Math.hypot(...L);
@@ -110,20 +113,22 @@ export function createHUD({ isTouch, onEmote, onInteract, onChatSubmit }) {
     if (kind === 'town') { ctx.fillStyle = '#ff9f43'; ctx.beginPath(); ctx.moveTo(-r, 0); ctx.lineTo(0, -r); ctx.lineTo(r, 0); ctx.lineTo(r * 0.7, r * 0.9); ctx.lineTo(-r * 0.7, r * 0.9); ctx.closePath(); ctx.stroke(); ctx.fill(); }
     else if (kind === 'lighthouse') { ctx.fillStyle = '#ff5e57'; ctx.beginPath(); ctx.moveTo(-r * 0.5, r); ctx.lineTo(-r * 0.25, -r); ctx.lineTo(r * 0.25, -r); ctx.lineTo(r * 0.5, r); ctx.closePath(); ctx.stroke(); ctx.fill(); }
     else if (kind === 'games') { ctx.fillStyle = '#a29bfe'; ctx.beginPath(); ctx.roundRect(-r * 0.8, -r * 0.8, r * 1.6, r * 1.6, r * 0.3); ctx.stroke(); ctx.fill(); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, 0, r * 0.22, 0, 7); ctx.fill(); }
+    else if (kind === 'temple') { ctx.fillStyle = '#ffb347'; ctx.beginPath(); ctx.moveTo(0, -r * 1.15); ctx.quadraticCurveTo(r * 0.55, -r * 0.2, r * 0.6, r * 0.9); ctx.lineTo(-r * 0.6, r * 0.9); ctx.quadraticCurveTo(-r * 0.55, -r * 0.2, 0, -r * 1.15); ctx.closePath(); ctx.stroke(); ctx.fill(); }
+    else if (kind === 'lake') { ctx.fillStyle = '#7fe3ff'; ctx.beginPath(); ctx.arc(0, -r * 0.1, r * 0.8, 0, 7); ctx.stroke(); ctx.fill(); ctx.strokeStyle = '#0b5a7a'; ctx.lineWidth = r * 0.2; ctx.beginPath(); ctx.moveTo(-r * 0.45, -r * 0.1); ctx.quadraticCurveTo(0, -r * 0.45, r * 0.45, -r * 0.1); ctx.stroke(); }
     else { ctx.fillStyle = '#48dbfb'; ctx.beginPath(); ctx.rect(-r * 0.25, -r, r * 0.5, r * 2); ctx.stroke(); ctx.fill(); }
     ctx.restore();
   };
   const drawMinimap = (player, others) => {
     if (!base) return;
-    const px = cv.width, big = state.bigMap, span = big ? SIZE : 520, scale = px / span;
-    const ox = big ? -HALF : player.x - span / 2, oz = big ? -HALF : player.z - span / 2;
+    const px = cv.width, big = state.bigMap, span = big ? WS : VIEW, scale = px / span;
+    const ox = big ? -WH : player.x - span / 2, oz = big ? -WH : player.z - span / 2;
     ctx.clearRect(0, 0, px, px);
     ctx.save();
     ctx.beginPath(); ctx.arc(px / 2, px / 2, px / 2, 0, Math.PI * 2); ctx.clip();
     ctx.fillStyle = '#1d4e75'; ctx.fillRect(0, 0, px, px);
-    const k = base.width / SIZE;
+    const k = base.width / WS;
     ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(base, (ox + HALF) * k, (oz + HALF) * k, span * k, span * k, 0, 0, px, px);
+    ctx.drawImage(base, (ox + WH) * k, (oz + WH) * k, span * k, span * k, 0, 0, px, px);
     const ir = (big ? 9 : 7) * dpr * (isTouch ? 0.8 : 1);
     for (const lm of landmarks) {
       const x = (lm.x - ox) * scale, y = (lm.z - oz) * scale;
@@ -176,7 +181,7 @@ export function createHUD({ isTouch, onEmote, onInteract, onChatSubmit }) {
         box.appendChild(c);
       }
     },
-    initMinimap, drawMinimap, toggleMap,
+    initMinimap, initMinimapImage, drawMinimap, toggleMap,
     isBigMap: () => state.bigMap,
   };
 }
