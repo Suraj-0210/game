@@ -548,7 +548,7 @@ function openTravel() {
   const cur = CITY ? (areaAt(player.x, player.z) || nearestArea()) : ZONE;
   const rows = ZONES.map((z) => {
     const here = z.id === cur;
-    return `<button class="tz ${here ? 'here' : ''}" data-z="${z.id}" ${here ? 'disabled' : ''}><span class="ic">${z.icon}</span><span class="tx"><b>${z.name}</b><span>${z.blurb}</span></span><span class="km">${here ? 'You are here' : (z.km ? '~' + Math.abs(z.km - (ZONE_BY_ID[cur].km || 0)) + ' km' : 'Start')}</span></button>`;
+    return `<button class="tz ${here ? 'here' : ''}" data-z="${z.id}" ${here ? 'disabled' : ''}><span class="ic">${z.icon}</span><span class="tx"><b>${z.name}</b><span>${z.blurb}</span></span><span class="km">${here ? 'You are here' : (z.km ? '~' + (Math.round(Math.abs(z.km - (ZONE_BY_ID[cur].km || 0)) * 2) / 2) + ' km' : 'Start')}</span></button>`;
   }).join('');
   $('tbox').innerHTML = `<h2>Where to?</h2><div class="sub">Raju the auto driver can take you anywhere in Bhubaneswar. The ride is free.</div><div class="tlist">${rows}</div><div class="row"><button id="tClose">Stay here</button></div>`;
   $('travel').classList.add('open');

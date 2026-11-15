@@ -8,18 +8,20 @@ export const GAP = 300;                   // road between two neighbouring areas
 export const PITCH = TILE + GAP;
 
 // [x, z] of each area centre (x east, z south). North is -z.
+// Laid out in the REAL order and directions (from OpenStreetMap): the Old Town is at the south end of a long north-south line.
+// Real straight-line distances from the Old Town: Baramunda 5.5 km, Khandagiri 6 km, Vani Vihar and Jaydev Vihar 6 km, Rasulgarh 7 km, Patia / Infocity 11.5 km.
+// Here the distances are squeezed to about 1.3 km per step so the whole city can be crossed in a few minutes.
 export const LAYOUT = {
   oldtown: [0, 0],
-  baramunda: [-PITCH, 0],          // west of the Old Town, on NH-16
-  khandagiri: [-PITCH, PITCH],     // south of Baramunda, at the foot of the hills
-  rasulgarh: [-PITCH, -PITCH],     // north of Baramunda
-  jaydev: [0, -PITCH],             // north of the Old Town
-  vanivihar: [0, -2 * PITCH],      // north of Jaydev Vihar
-  patia: [PITCH, -2 * PITCH],      // north-east, towards Infocity
+  vanivihar: [0, -PITCH],          // Janpath / Sachivalaya Marg run north from the Old Town to Vani Vihar
+  jaydev: [0, -2 * PITCH],         // Jaydev Vihar square, on the NH-16 flyover corridor
+  patia: [0, -3 * PITCH],          // Nandankanan Road and Infocity Road lead north to Patia and KIIT
+  rasulgarh: [PITCH, -2 * PITCH],  // east of Jaydev Vihar, where NH-16 crosses at the Rasulgarh flyover
+  baramunda: [-PITCH, -PITCH],     // the bus stand, west of the main road
+  khandagiri: [-2 * PITCH, -PITCH],// further west, at the foot of the Khandagiri and Udayagiri hills
 };
 export const LINKS = [
-  ['oldtown', 'baramunda'], ['oldtown', 'jaydev'], ['baramunda', 'khandagiri'], ['baramunda', 'rasulgarh'],
-  ['rasulgarh', 'jaydev'], ['jaydev', 'vanivihar'], ['vanivihar', 'patia'],
+  ['oldtown', 'vanivihar'], ['vanivihar', 'jaydev'], ['jaydev', 'patia'], ['jaydev', 'rasulgarh'], ['vanivihar', 'baramunda'], ['baramunda', 'khandagiri'],
 ];
 const MARGIN = 160;
 export const BOUNDS = (() => {

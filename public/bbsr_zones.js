@@ -6,11 +6,11 @@ import { WORLD, EDGE } from './bbsr_plan.js';
 export const ZONES = [
   { id: 'oldtown', room: 'bbsr', name: 'Old Town · Ekamra Kshetra', short: 'Old Town', icon: '\u{1F6D5}', km: 0, blurb: 'Lingaraja Temple, Bindusagar tank, Tala Bazaar' },
   { id: 'khandagiri', room: 'khandagiri', name: 'Khandagiri', short: 'Khandagiri', icon: '⛰️', km: 6, blurb: 'Rock-cut caves and a Jain temple on the hill' },
-  { id: 'baramunda', room: 'baramunda', name: 'Baramunda', short: 'Baramunda', icon: '\u{1F68C}', km: 8, blurb: 'The ISBT bus terminal, the flyover and the market lane' },
-  { id: 'jaydev', room: 'jaydev', name: 'Jaydev Vihar', short: 'Jaydev Vihar', icon: '\u{1F3E8}', km: 7, blurb: 'The big square, the flyover, hotels and malls' },
+  { id: 'baramunda', room: 'baramunda', name: 'Baramunda', short: 'Baramunda', icon: '\u{1F68C}', km: 5.5, blurb: 'The ISBT bus terminal, the flyover and the market lane' },
+  { id: 'jaydev', room: 'jaydev', name: 'Jaydev Vihar', short: 'Jaydev Vihar', icon: '\u{1F3E8}', km: 6, blurb: 'The big square, the flyover, hotels and malls' },
   { id: 'vanivihar', room: 'vanivihar', name: 'Vani Vihar (Bani Vihar)', short: 'Vani Vihar', icon: '\u{1F393}', km: 6, blurb: 'Utkal University gate and campus, the square' },
   { id: 'rasulgarh', room: 'rasulgarh', name: 'Rasulgarh', short: 'Rasulgarh', icon: '\u{1F3ED}', km: 7, blurb: 'The square and flyover, the Industrial Estate, the bazaar' },
-  { id: 'patia', room: 'patia', name: 'Patia · Infocity', short: 'Patia · Infocity', icon: '\u{1F3E2}', km: 12, blurb: 'IT towers, Patia Square, the KIIT gate' },
+  { id: 'patia', room: 'patia', name: 'Patia · Infocity', short: 'Patia · Infocity', icon: '\u{1F3E2}', km: 11.5, blurb: 'IT towers, Patia Square, the KIIT gate' },
 ];
 export const ZONE_BY_ID = Object.fromEntries(ZONES.map((z) => [z.id, z]));
 export const zoneId = (s) => (ZONE_BY_ID[s] ? s : 'oldtown');
