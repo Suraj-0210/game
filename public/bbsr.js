@@ -9,6 +9,7 @@ import { createMissions, spotsFromPlan, ITEMS, SPOT_LABELS, QUEST_LIST, isNight 
 import { buildCity } from './bbsr_mesh.js';
 import { ZONES, ZONE_BY_ID, zoneId, zoneRoom, buildZonePlan } from './bbsr_zones.js';
 import { buildZoneExtras } from './bbsr_zone_mesh.js';
+import { LAYOUT, BOUNDS, inBounds, areaAt, distToArea, offsetPlan, buildConnectors } from './bbsr_city.js';
 import { makeCityTextures } from './bbsr_tex.js';
 import { makeTextures } from './textures.js';
 import { createHUD } from './hud.js';
@@ -26,8 +27,11 @@ const isTouch = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart'
 if (isTouch) document.body.classList.add('touch');
 // quality: phones get the lighter settings automatically; add ?lite to the URL on any device to force them
 const LITE = isTouch || new URLSearchParams(location.search).has('lite');
-const ZONE = zoneId(new URLSearchParams(location.search).get('zone'));   // which area of Bhubaneswar this page shows
-document.title = ZONE_BY_ID[ZONE].name + ' · Bhubaneswar';
+// Default: ONE connected Bhubaneswar (every area in one world). ?zone=<id> shows a single area on its own (for testing).
+const CITY = !new URLSearchParams(location.search).has('zone');
+const ZONE = zoneId(new URLSearchParams(location.search).get('zone'));
+document.title = CITY ? 'Bhubaneswar' : ZONE_BY_ID[ZONE].name + ' · Bhubaneswar';
+const inWorld = (x, z) => (CITY ? inBounds(x, z) : Math.abs(x) < EDGE && Math.abs(z) < EDGE);
 
 const FOG_COLOR = 0xdde8f1, FOG_NEAR = 70, FOG_FAR = 900;
 const UNDER_COLOR = 0x0a4f73;
@@ -80,6 +84,7 @@ scene.add(nightFill);
 const nightSky = createNightSky(THREE); scene.add(nightSky.group);
 const beacon = createBeacon(THREE); scene.add(beacon.group);
 let glow = null, zoneMats = null;
+const zoneGlass = [], towns = [], parts = [];   // the city: glass materials, per-area meshes, per-area plans
 if (!LITE) {
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -183,8 +188,8 @@ function applyTime(camPos, t, cover) {
   moon.intensity = 0.7 * ts.night * (1 - 0.7 * cover);
   nightFill.intensity = 0.9 * ts.night * (1 - 0.5 * cover);
   if (Math.abs(ts.env - lastEnv) > 0.003) { for (const m of envMats) m.envMapIntensity = m.userData.envBase * ts.env; lastEnv = ts.env; }
-  if (town && town.mats) { town.mats.lamp.emissiveIntensity = 0.12 + 3.4 * ts.lampOn; town.mats.stone.emissiveIntensity = 0.5 * ts.lampOn; }
-  if (zoneMats) zoneMats.glass.emissiveIntensity = 1.0 * ts.lampOn;
+  for (const tw of towns) { tw.mats.lamp.emissiveIntensity = 0.12 + 3.4 * ts.lampOn; tw.mats.stone.emissiveIntensity = 0.5 * ts.lampOn; }
+  for (const g of zoneGlass) g.emissiveIntensity = 1.0 * ts.lampOn;
   nightSky.update(camPos, ts, cover);
   if (glow) glow.update(camPos, ts.lampOn, cover, t, frameNo % 8 === 0);
 }
@@ -292,7 +297,7 @@ function spawn() {
 }
 function moveH(dx, dz) {
   const ox = player.x, oz = player.z, nx = ox + dx, nz = oz + dz;
-  if (Math.abs(nx) > EDGE || Math.abs(nz) > EDGE) return false;
+  if (!inWorld(nx, nz)) return false;
   // solid things block you (also while flying); if you are already inside one you may move out of it
   if (blocked(nx, nz, PR, player.y) && !blocked(ox, oz, PR, player.y)) return false;
   player.x = nx; player.z = nz;
@@ -304,7 +309,7 @@ function pushOut() {
   if (!blocked(player.x, player.z, PR, g(player.x, player.z))) return;
   for (let r = 1; r <= 30; r += 1) for (let k = 0; k < 24; k++) {
     const a = (k / 24) * Math.PI * 2, x = player.x + Math.cos(a) * r, z = player.z + Math.sin(a) * r, y = g(x, z);
-    if (Math.abs(x) < EDGE && Math.abs(z) < EDGE && !blocked(x, z, PR + 0.1, y)) { player.x = x; player.z = z; player.y = y; player.vy = 0; return; }
+    if (inWorld(x, z) && !blocked(x, z, PR + 0.1, y)) { player.x = x; player.z = z; player.y = y; player.vy = 0; return; }
   }
 }
 const EMOTE_TIME = { 1: 3200, 4: 3200, 5: 3500, 6: 3000, 7: 3600, 8: 4200 }; // the rest (dance, sit, sleep) last until you move
@@ -428,10 +433,23 @@ function showLines(lines, ms = 4200) {
 }
 function rearmSpots() { spotArmed = {}; }
 function initMissions() {
-  const spots = ZONE === 'oldtown' ? spotsFromPlan(plan, { COMPOUND, LAKE, MAHAKALA }) : Object.fromEntries(plan.spots.map((s) => [s.id, { x: s.x, z: s.z, r: s.r }]));
+  const old = CITY ? parts[0].plan : plan;   // the Old Town plan (it sits at the origin, so its story coordinates are unchanged)
+  const spots = (CITY || ZONE === 'oldtown') ? spotsFromPlan(old, { COMPOUND, LAKE, MAHAKALA }) : Object.fromEntries(plan.spots.map((s) => [s.id, { x: s.x, z: s.z, r: s.r }]));
+  let extra = null;
+  if (CITY) {
+    extra = { spots: [], zones: {} };
+    for (const pt of parts.slice(1)) {
+      extra.zones[pt.id] = { name: ZONE_BY_ID[pt.id].name };
+      for (const sp of pt.plan.spots) {
+        const info = pt.plan.spotInfo[sp.id] || {};
+        extra.spots.push({ id: sp.id, label: info.label || sp.label, text: info.text, xp: info.xp || 0, zone: pt.id, x: sp.x, z: sp.z });
+        spots[sp.id] = { x: sp.x, z: sp.z, r: sp.r };
+      }
+    }
+  }
   spotList = Object.entries(spots).map(([id, p]) => ({ id, ...p }));
   missions = createMissions({
-    plan, spots, hour: () => curHour,
+    plan: old, spots, extra, hour: () => curHour,
     load: () => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); } catch (e) { return null; } },
     save: (s) => { try { localStorage.setItem(STORE_KEY, JSON.stringify(s)); } catch (e) { /* private window: progress lasts for this visit only */ } },
   });
@@ -452,7 +470,7 @@ function checkSpots() {
     else if (d > sp.r * 1.5) spotArmed[sp.id] = false;
   }
 }
-let objNow = null;
+let objNow = null, lastArea = null, welcomed = false;
 function refreshQuest() {
   if (!missions) return;
   const st = missions.state, o = missions.objective(); objNow = o;
@@ -512,9 +530,10 @@ let travelOpen = false, travelling = false;
 function openTravel() {
   if (travelOpen || travelling) return;
   travelOpen = true; for (const k in keys) keys[k] = false; document.exitPointerLock?.();
+  const cur = CITY ? (areaAt(player.x, player.z) || nearestArea()) : ZONE;
   const rows = ZONES.map((z) => {
-    const here = z.id === ZONE;
-    return `<button class="tz ${here ? 'here' : ''}" data-z="${z.id}" ${here ? 'disabled' : ''}><span class="ic">${z.icon}</span><span class="tx"><b>${z.name}</b><span>${z.blurb}</span></span><span class="km">${here ? 'You are here' : (z.km ? '~' + Math.abs(z.km - (ZONE_BY_ID[ZONE].km || 0)) + ' km' : 'Start')}</span></button>`;
+    const here = z.id === cur;
+    return `<button class="tz ${here ? 'here' : ''}" data-z="${z.id}" ${here ? 'disabled' : ''}><span class="ic">${z.icon}</span><span class="tx"><b>${z.name}</b><span>${z.blurb}</span></span><span class="km">${here ? 'You are here' : (z.km ? '~' + Math.abs(z.km - (ZONE_BY_ID[cur].km || 0)) + ' km' : 'Start')}</span></button>`;
   }).join('');
   $('tbox').innerHTML = `<h2>Where to?</h2><div class="sub">Raju the auto driver can take you anywhere in Bhubaneswar. The ride is free.</div><div class="tlist">${rows}</div><div class="row"><button id="tClose">Stay here</button></div>`;
   $('travel').classList.add('open');
@@ -526,9 +545,20 @@ function closeTravel() {
   travelOpen = false; $('travel').classList.remove('open');
   if (!isTouch) { try { renderer.domElement.requestPointerLock(); } catch (e) { /* the overlay offers Play */ } }
 }
+function nearestArea() { let b = 'oldtown', bd = 1e9; for (const id in LAYOUT) { const d = distToArea(id, player.x, player.z); if (d < bd) { bd = d; b = id; } } return b; }
 function travelTo(id) {
-  if (travelling || !ZONE_BY_ID[id] || id === ZONE) return;
+  if (travelling || !ZONE_BY_ID[id] || (!CITY && id === ZONE)) return;
   travelling = true;
+  if (CITY) {   // same world: the auto drives you across town
+    $('tbox').innerHTML = `<h2>${ZONE_BY_ID[id].icon} Off to ${ZONE_BY_ID[id].short}...</h2><div class="sub">Hold on tight. Tr-r-r-ring!</div>`;
+    setTimeout(() => {
+      const pt = parts.find((q) => q.id === id), sp = pt.plan.spawn;
+      player.x = sp.x; player.z = sp.z; player.yaw = sp.yaw; player.y = ground(sp.x, sp.z); player.vy = 0;
+      if (vegetation) vegetation.update(player.x, player.z);
+      travelling = false; closeTravel(); lastArea = null;
+    }, 900);
+    return;
+  }
   $('tbox').innerHTML = `<h2>${ZONE_BY_ID[id].icon} Off to ${ZONE_BY_ID[id].short}...</h2><div class="sub">Hold on tight. Tr-r-r-ring!</div>`;
   const u = new URL(location.href);
   if (id === 'oldtown') u.searchParams.delete('zone'); else u.searchParams.set('zone', id);
@@ -783,7 +813,7 @@ function connect() {
     for (const id of doorBoxes.keys()) setDoorOpen(id, !!(doors && doors[id]), false);
     for (const id of [...others.keys()]) removeOther(id);
     voice.setSelf(selfId);
-    if (!spawned) { spawn(); spawned = true; hud.toast('Welcome to ' + ZONE_BY_ID[ZONE].name + (ZONE === 'oldtown' ? '' : '. Find the auto stand to go back.'), 4200); }
+    if (!spawned) { spawn(); spawned = true; hud.toast(CITY ? 'Welcome to Bhubaneswar. Roads and auto stands link the whole city.' : 'Welcome to ' + ZONE_BY_ID[ZONE].name + (ZONE === 'oldtown' ? '' : '. Find the auto stand to go back.'), 4200); if (CITY) { lastArea = 'oldtown'; welcomed = true; } }
     rebuildSelf();
     for (const p of Object.values(players)) if (p.id !== selfId) addOther(p);
     ready = true;
@@ -880,7 +910,14 @@ function frame(now) {
     if (frameNo % 30 === 7 && !player.fly && !player.sit) pushOut();
     if (!isTouch || frameNo % 2 === 0) hud.drawMinimap(player, [...others.values()].filter((o) => o.seen).map((o) => ({ x: o.group.position.x, z: o.group.position.z })), objNow);
   }
-  if (town) town.update(t, waveHeight);
+  for (const tw of towns) tw.update(t, waveHeight);
+  if (CITY && ready && frameNo % 12 === 4) {
+    const px = player.x, pz = player.z;
+    for (const pt of parts) pt.town.group.visible = distToArea(pt.id, px, pz) < FOG_FAR + 120;   // only draw the areas you can see
+    const a = areaAt(px, pz);
+    if (a && a !== lastArea) { if (lastArea !== null || !welcomed) hud.toast(ZONE_BY_ID[a].name, 2600); lastArea = a; welcomed = true; }
+    else if (!a) lastArea = null;
+  }
   if (waterUniforms) waterUniforms.uTime.value = t;
   if (!ready) updateWeather(dt, t, camera.position);
   renderer.render(scene, camera);
@@ -888,34 +925,71 @@ function frame(now) {
 
 // ======================= startup =======================
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+// ---- the connected city: build every area at its place in one world ----
+async function buildCityWorld(osm) {
+  for (const z of ZONES) {
+    statusEl.textContent = 'Building ' + z.name + '...'; await nextFrame();
+    const p = z.id === 'oldtown' ? buildPlan(osm) : buildZonePlan(z.id);
+    p.hoardings = [];                                    // the "edge of the map" signs are not needed any more
+    const [ox, oz] = LAYOUT[z.id];
+    const tw = buildCity({ THREE, mergeGeometries }, p, tex, { shadows: !LITE });
+    if (z.id !== 'oldtown') { const ex = buildZoneExtras({ THREE, mergeGeometries }, p, tex, tw.mats.M, { shadows: !LITE }); tw.group.add(ex.group); if (ex.mats && ex.mats.glass) zoneGlass.push(ex.mats.glass); }
+    const gm = tw.group.userData.groundMesh; if (gm) tw.group.remove(gm);   // one shared ground for the whole city (below)
+    tw.group.position.set(ox, 0, oz);
+    scene.add(tw.group);
+    towns.push(tw);
+    parts.push({ id: z.id, ox, oz, plan: p, town: tw, map: tw.mapCanvas() });
+  }
+  // one big ground, and the roads that join the areas
+  const M0 = towns[0].mats.M, W = BOUNDS.x1 - BOUNDS.x0, D = BOUNDS.z1 - BOUNDS.z0;
+  const g = new THREE.PlaneGeometry(W, D).rotateX(-Math.PI / 2), uv = g.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (W / 8), uv.getY(i) * (D / 8));
+  const gnd = new THREE.Mesh(g, M0.ground); gnd.position.set((BOUNDS.x0 + BOUNDS.x1) / 2, -0.02, (BOUNDS.z0 + BOUNDS.z1) / 2); gnd.receiveShadow = true; scene.add(gnd);
+  const conn = buildConnectors(THREE, M0); scene.add(conn.group);
+  parts.forEach((pt) => offsetPlan(pt.plan, pt.ox, pt.oz));      // gameplay data moves into world coordinates (meshes already sit in place)
+  const cat = (k) => parts.flatMap((pt) => pt.plan[k] || []), old = parts[0].plan;
+  const hz = parts.filter((pt) => pt.plan.height);
+  plan = {
+    city: true, short: 'Bhubaneswar', name: 'Bhubaneswar', osm: old.osm, lake: old.lake, chai: old.chai, spawn: old.spawn, travel: old.travel,
+    boxes: cat('boxes'), circles: cat('circles'), interactables: cat('interactables'), npcs: cat('npcs'), landmarks: cat('landmarks'), lamps: cat('lamps'), stalls: cat('stalls'), temples: cat('temples'),
+    trees: { palms: parts.flatMap((pt) => pt.plan.trees.palms), broad: parts.flatMap((pt) => pt.plan.trees.broad), pines: [], rocks: parts.flatMap((pt) => pt.plan.trees.rocks) },
+    height: hz.length ? (x, z) => { for (const pt of hz) if (Math.abs(x - pt.ox) <= 500 && Math.abs(z - pt.oz) <= 500) return pt.plan.height(x - pt.ox, z - pt.oz); return 0; } : null,
+  };
+  town = towns[0];
+  cityLinks = conn.links;
+}
+let cityLinks = [];
 async function boot() {
   statusEl.textContent = 'Surveying Old Town...'; await nextFrame();
   let osm = null;   // real OpenStreetMap streets and buildings, if tools/fetch_osm.mjs has been run
   if (ZONE === 'oldtown') { try { const r = await fetch('/data/oldtown_osm.json'); if (r.ok) osm = await r.json(); } catch (e) { /* none: use the hand-drawn layout */ } }
-  plan = ZONE === 'oldtown' ? buildPlan(osm) : buildZonePlan(ZONE);
-  plan.short = ZONE_BY_ID[ZONE].short;
+  if (CITY) await buildCityWorld(osm);
+  else { plan = ZONE === 'oldtown' ? buildPlan(osm) : buildZonePlan(ZONE); plan.short = ZONE_BY_ID[ZONE].short; }
   { const c = document.createElement('div'); c.style.cssText = 'opacity:.55;font-size:11px;margin-top:6px'; c.textContent = ZONE !== 'oldtown' ? ZONE_BY_ID[ZONE].name + ': a hand-drawn approximation of the real place (landmarks right, exact street layout not surveyed).' : plan.osm ? 'Map data \u00a9 OpenStreetMap contributors' : 'Street layout: hand-drawn alpha (run tools/fetch_osm.mjs for the real OpenStreetMap streets)'; $('help').appendChild(c); }
   statusEl.textContent = 'Planting trees...'; await nextFrame();
   buildVegetation();
   clouds = createClouds(THREE, { puff: tex.puff, noise: tex.noise, count: LITE ? 26 : 46 }); scene.add(clouds.group);
   rainFx = createRain(THREE, { count: LITE ? 3200 : 7500 }); scene.add(rainFx.object);
   statusEl.textContent = 'Raising the temples...'; await nextFrame();
-  town = buildCity({ THREE, mergeGeometries }, plan, tex, { shadows: !LITE });
-  scene.add(town.group);
-  if (ZONE !== 'oldtown') { const ex = buildZoneExtras({ THREE, mergeGeometries }, plan, tex, town.mats.M, { shadows: !LITE }); town.group.add(ex.group); zoneMats = ex.mats; }
+  if (!CITY) {
+    town = buildCity({ THREE, mergeGeometries }, plan, tex, { shadows: !LITE });
+    scene.add(town.group); towns.push(town);
+    if (ZONE !== 'oldtown') { const ex = buildZoneExtras({ THREE, mergeGeometries }, plan, tex, town.mats.M, { shadows: !LITE }); town.group.add(ex.group); zoneMats = ex.mats; zoneGlass.push(ex.mats.glass); }
+  }
   plan.boxes.forEach(addBoxCollider);
   plan.circles.forEach((c) => addCollider(c.x, c.z, c.r, c.y0, c.y1));
   buildNpcs();
   interactables = plan.interactables;
-  glow = createLightGlow(THREE, collectLights(plan), { lite: LITE }); scene.add(glow.group);
+  glow = createLightGlow(THREE, CITY ? parts.flatMap((pt) => collectLights(pt.plan)) : collectLights(plan), { lite: LITE }); scene.add(glow.group);
   collectEnvMats();
   initMissions();
-  hud.initMinimapImage(town.mapCanvas(), WORLD, plan.landmarks);
+  if (CITY) hud.initMinimapTiles(parts.map((pt) => ({ canvas: pt.map, ox: pt.ox, oz: pt.oz })), BOUNDS, cityLinks, plan.landmarks);
+  else hud.initMinimapImage(town.mapCanvas(), WORLD, plan.landmarks);
   // park the camera over the plaza looking at the Lingaraja tower until the player joins
   camera.position.set(150, 24, 280); camera.lookAt(-72, 28, 185);
   statusEl.textContent = 'Connecting to server...'; await nextFrame();
   connect();
 }
-window.__vw = { scene, camera, renderer, player, keys, hud, voice, setDoorOpen, doorOpen, get indoors() { return indoors; }, npcs, wx, setWeather: (m) => { weatherMode = m; wxInit = false; }, setWind: (v) => { windOverride = v; }, get vegetation() { return vegetation; }, get plan() { return plan; }, ground, blocked, setEmote, interact, get nearest() { return nearest; }, get missions() { return missions; }, ZONE, openTravel, travelTo, get travelOpen() { return travelOpen; }, get ts() { return ts; }, get hour() { return curHour; }, setTime: (h) => { todOverride = h; }, showLines, checkSpots, get glow() { return glow; }, get beacon() { return beacon; }, toggleJournal };
+window.__vw = { scene, camera, renderer, player, keys, hud, voice, setDoorOpen, doorOpen, get indoors() { return indoors; }, npcs, wx, setWeather: (m) => { weatherMode = m; wxInit = false; }, setWind: (v) => { windOverride = v; }, get vegetation() { return vegetation; }, get plan() { return plan; }, ground, blocked, setEmote, interact, get nearest() { return nearest; }, get missions() { return missions; }, ZONE, CITY, parts, areaAt, openTravel, travelTo, get travelOpen() { return travelOpen; }, get ts() { return ts; }, get hour() { return curHour; }, setTime: (h) => { todOverride = h; }, showLines, checkSpots, get glow() { return glow; }, get beacon() { return beacon; }, toggleJournal };
 requestAnimationFrame(frame);
 boot().catch((e) => { statusEl.textContent = 'Error: ' + e.message; console.error(e); });

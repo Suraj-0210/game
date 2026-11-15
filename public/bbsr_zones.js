@@ -75,6 +75,8 @@ export function buildZonePlan(id) {
     height: null, hill: null, spots: [], spotInfo: {}, travel: null, osm: false, groundAt: () => 0,
   };
   const ex = [];     // keep-clear rectangles {x0,z0,x1,z1}
+  // the connector roads of the connected city arrive at the middle of each edge: keep a corridor free there
+  for (const [a, b, c, d] of [[-26, -EDGE - 12, 26, -EDGE + 80], [-26, EDGE - 80, 26, EDGE + 12], [-EDGE - 12, -26, -EDGE + 80, 26], [EDGE - 80, -26, EDGE + 12, 26]]) ex.push({ x0: a, z0: b, x1: c, z1: d });
   let segs = [];
   const reindex = () => {
     segs = [];

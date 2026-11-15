@@ -107,12 +107,15 @@ const fresh = () => ({
   job: null, jobsDone: 0, lastJobDest: null, seq: 0, zoneDone: {},
 });
 
-export function createMissions({ plan, spots, load, save, hour, rng = Math.random }) {
+export function createMissions({ plan, spots, load, save, hour, rng = Math.random, extra = null }) {
   let s = fresh();
   try { const o = load && load(); if (o && typeof o === 'object') s = Object.assign(fresh(), o); } catch (e) { /* start fresh */ }
   for (const q of QUESTS) if (!s.quest[q.id]) s.quest[q.id] = { step: 0, done: false };
   const oldtown = !plan.zone || plan.zone === 'oldtown';        // quests and Sibu's jobs belong to the Old Town; the other areas have places to discover
   const meta = (id) => (plan.spotInfo && plan.spotInfo[id]) || { label: SPOT_LABELS[id], text: SPOT_TEXT[id], xp: 0 };
+  // The connected city: places to discover in the other areas (extra.spots) grouped by area (extra.zones)
+  const exSpots = new Map(((extra && extra.spots) || []).map((e) => [e.id, e]));
+  const exLeft = () => ((extra && extra.spots) || []).filter((e) => !s.spotsSeen[e.id]);
   const stalls = new Map(plan.stalls.map((t) => [t.key, t]));
   const npcs = new Map(plan.npcs.map((n) => [n.id, n]));
   const out = [];                 // lines produced by the current call
@@ -211,6 +214,22 @@ export function createMissions({ plan, spots, load, save, hour, rng = Math.rando
     // Arrive at a place of interest (the client calls this once per visit, when you walk into its circle)
     spot(id) {
       begin();
+      const ex = exSpots.get(id);
+      if (ex) {
+        const firstEx = !s.spotsSeen[id];
+        s.spotsSeen[id] = 1;
+        if (firstEx) {
+          say(`Discovered: ${ex.label}.`);
+          if (ex.text) say(ex.text);
+          if (ex.xp) give(0, ex.xp, 'Discovery');
+          const zone = extra.zones && extra.zones[ex.zone];
+          if (zone && extra.spots.filter((e) => e.zone === ex.zone).every((e) => s.spotsSeen[e.id]) && !s.zoneDone[ex.zone]) {
+            s.zoneDone[ex.zone] = 1;
+            give(40, 60, 'Explored ' + zone.name);
+          }
+        }
+        return done();
+      }
       const first = !s.spotsSeen[id], m = meta(id);
       s.spotsSeen[id] = 1;
       if (first) {
@@ -288,6 +307,10 @@ export function createMissions({ plan, spots, load, save, hour, rng = Math.rando
       return { kind: 'job', title: 'Delivery for Sibu', text: `Take the ${ITEMS[j.key].name} to ${j.dest.name}`, x: d.x, z: d.z };
     }
     const q = currentQuest();
+    if (!q && exLeft().length) {   // story done: head out to the rest of the city
+      const total = extra.spots.length, left = exLeft();
+      return { kind: 'quest', title: 'Explore Bhubaneswar', text: `Discover: ${left[0].label} (${total - left.length}/${total})`, x: left[0].x, z: left[0].z };
+    }
     if (!q) { const sb = npcs.get('sibu'); return { kind: 'free', title: 'All quests done', text: 'Talk to Sibu at the chai adda for delivery jobs', x: sb.x, z: sb.z }; }
     const st = s.quest[q.id], step = q.steps[st.step];
     let p = loc(step.target);

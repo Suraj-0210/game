@@ -14,8 +14,8 @@ app.use(express.static(path.join(__dirname, "public")));
 app.use("/three", express.static(path.join(__dirname, "node_modules/three")));
 
 // Diagnostics: open /health on your site to see which version is live and whether any game file is missing.
-const BUILD = "2026-11-13 island + Bhubaneswar Old Town (alpha: quests, jobs, day and night, 6 more areas)";
-const REQUIRED = ["bhubaneswar.html", "bbsr.js", "bbsr_plan.js", "bbsr_mesh.js", "bbsr_tex.js", "bbsr_missions.js", "bbsr_zones.js", "bbsr_zone_mesh.js", "bbsr_night.js", "bbsr_time.js", "index.html", "main.js", "island.js", "textures.js", "town.js", "townmesh.js", "hotel.js", "interiors.js", "hud.js", "avatar.js", "customize.js", "weather.js", "atmosphere.js", "audio.js", "foliage.js", "vegetation.js", "voice.js"];
+const BUILD = "2026-11-13 island + Bhubaneswar Old Town (alpha: quests, jobs, day and night, one connected city)";
+const REQUIRED = ["bhubaneswar.html", "bbsr.js", "bbsr_plan.js", "bbsr_mesh.js", "bbsr_tex.js", "bbsr_missions.js", "bbsr_zones.js", "bbsr_city.js", "bbsr_zone_mesh.js", "bbsr_night.js", "bbsr_time.js", "index.html", "main.js", "island.js", "textures.js", "town.js", "townmesh.js", "hotel.js", "interiors.js", "hud.js", "avatar.js", "customize.js", "weather.js", "atmosphere.js", "audio.js", "foliage.js", "vegetation.js", "voice.js"];
 app.get(["/bhubaneswar", "/bbsr"], (req, res) => res.sendFile(path.join(__dirname, "public", "bhubaneswar.html")));
 app.get("/health", (req, res) => {
   const files = {};
@@ -24,7 +24,7 @@ app.get("/health", (req, res) => {
   res.json({ build: BUILD, node: process.version, threeInstalled: threeOk, playersOnline: Object.keys(players).length, perWorld: Object.fromEntries(WORLDS.map((w) => [w, Object.values(players).filter((p) => p.world === w).length])), files });
 });
 
-const LIMIT = 2000;
+const LIMIT = 4000;   // the connected city spans about 3.6 km by 4.9 km around the Old Town
 const NEARBY = 45; // metres for nearby chat
 const COLORS = [0xd63031, 0x0984e3, 0x00b894, 0xfdcb6e, 0x6c5ce7, 0xe84393, 0xe17055, 0x00cec9];
 const players = {};

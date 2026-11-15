@@ -90,6 +90,9 @@ export function createHUD({ isTouch, onEmote, onInteract, onChatSubmit }) {
   };
   // A world that draws its own map (the city): a square canvas covering [-size/2, size/2] on both axes
   const initMinimapImage = (canvas, size, lms) => { base = canvas; WS = size; WH = size / 2; VIEW = 360; landmarks = lms; };
+  // The connected city: several area pictures (each a 1000 m square centred on its own x,z) plus connector roads
+  let tiles = null, cityB = null, cityRoads = [];
+  const initMinimapTiles = (list, b, roads, lms) => { tiles = list; cityB = b; cityRoads = roads || []; base = list[0].canvas; landmarks = lms; VIEW = 420; };
   const initMinimap = (terrain, lms) => {
     landmarks = lms; WS = SIZE; WH = HALF; VIEW = 520;
     const N = 512, c = document.createElement('canvas'); c.width = c.height = N;
@@ -120,15 +123,27 @@ export function createHUD({ isTouch, onEmote, onInteract, onChatSubmit }) {
   };
   const drawMinimap = (player, others, mark) => {
     if (!base) return;
-    const px = cv.width, big = state.bigMap, span = big ? WS : VIEW, scale = px / span;
-    const ox = big ? -WH : player.x - span / 2, oz = big ? -WH : player.z - span / 2;
+    const px = cv.width, big = state.bigMap;
+    const span = tiles ? (big ? Math.max(cityB.x1 - cityB.x0, cityB.z1 - cityB.z0) : VIEW) : (big ? WS : VIEW), scale = px / span;
+    const ox = tiles ? (big ? (cityB.x0 + cityB.x1) / 2 - span / 2 : player.x - span / 2) : (big ? -WH : player.x - span / 2);
+    const oz = tiles ? (big ? (cityB.z0 + cityB.z1) / 2 - span / 2 : player.z - span / 2) : (big ? -WH : player.z - span / 2);
     ctx.clearRect(0, 0, px, px);
     ctx.save();
     ctx.beginPath(); ctx.arc(px / 2, px / 2, px / 2, 0, Math.PI * 2); ctx.clip();
-    ctx.fillStyle = '#1d4e75'; ctx.fillRect(0, 0, px, px);
-    const k = base.width / WS;
+    ctx.fillStyle = tiles ? '#9bb36f' : '#1d4e75'; ctx.fillRect(0, 0, px, px);
     ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(base, (ox + WH) * k, (oz + WH) * k, span * k, span * k, 0, 0, px, px);
+    if (tiles) {
+      ctx.lineCap = 'butt'; ctx.strokeStyle = '#7c7a76';
+      for (const r of cityRoads) { ctx.lineWidth = Math.max(2, r.w * scale); ctx.beginPath(); ctx.moveTo((r.x0 - ox) * scale, (r.z0 - oz) * scale); ctx.lineTo((r.x1 - ox) * scale, (r.z1 - oz) * scale); ctx.stroke(); }
+      for (const t of tiles) {
+        const dx = (t.ox - 500 - ox) * scale, dy = (t.oz - 500 - oz) * scale, sz = 1000 * scale;
+        if (dx > px || dy > px || dx + sz < 0 || dy + sz < 0) continue;
+        ctx.drawImage(t.canvas, dx, dy, sz, sz);
+      }
+    } else {
+      const k = base.width / WS;
+      ctx.drawImage(base, (ox + WH) * k, (oz + WH) * k, span * k, span * k, 0, 0, px, px);
+    }
     const ir = (big ? 9 : 7) * dpr * (isTouch ? 0.8 : 1);
     for (const lm of landmarks) {
       const x = (lm.x - ox) * scale, y = (lm.z - oz) * scale;
@@ -189,7 +204,7 @@ export function createHUD({ isTouch, onEmote, onInteract, onChatSubmit }) {
         box.appendChild(c);
       }
     },
-    initMinimap, initMinimapImage, drawMinimap, toggleMap,
+    initMinimap, initMinimapImage, initMinimapTiles, drawMinimap, toggleMap,
     isBigMap: () => state.bigMap,
   };
 }

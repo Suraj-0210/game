@@ -187,7 +187,7 @@ export function buildCity({ THREE, mergeGeometries }, plan, tex, opts = {}) {
   {
     const g = new THREE.PlaneGeometry(3600, 3600).rotateX(-Math.PI / 2), uv = g.attributes.uv;
     for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 450, uv.getY(i) * 450);
-    const m = new THREE.Mesh(g, M.ground); m.position.y = -0.02; m.receiveShadow = true; group.add(m);
+    const m = new THREE.Mesh(g, M.ground); m.position.y = -0.02; m.receiveShadow = true; group.add(m); group.userData.groundMesh = m;
   }
 
   // ----- roads, centre lines, courtyard paving -----

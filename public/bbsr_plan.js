@@ -198,6 +198,7 @@ export function buildPlan(osm = null) {
     const nr = nearestRoad(x, z); if (nr.d < r * 0.85 + 2.2) return true;
     if (lakeValue(x, z, 30 + r * 0.6) < 1) return true;
     if (x > x0 - 16 - r && x < x1 + 16 + r && z > z0 - 16 - r && z < z1 + 16 + r) return true;
+    if ((Math.abs(z) < 30 + r && Math.abs(x) > 420) || (Math.abs(x) < 30 + r && Math.abs(z) > 420)) return true;   // corridors for the roads to the neighbouring areas
     if (x > 20 && x < 100 && z > 128 && z < 242) return true;                                        // plaza
     if (Math.abs(x - 58) < 16 + r && z > -112 && z < 168) return true;                                 // market street
     if (x > 128 - r && x < 172 + r && z > -112 - r && z < -74 + r) return true;                        // chai adda
