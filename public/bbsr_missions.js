@@ -104,13 +104,15 @@ export function spotsFromPlan(plan, geom) {
 const fresh = () => ({
   coins: START_COINS, xp: 0, tasted: {}, bag: {}, spotsSeen: {},
   quest: {}, // id -> { step, done }
-  job: null, jobsDone: 0, lastJobDest: null, seq: 0,
+  job: null, jobsDone: 0, lastJobDest: null, seq: 0, zoneDone: {},
 });
 
 export function createMissions({ plan, spots, load, save, hour, rng = Math.random }) {
   let s = fresh();
   try { const o = load && load(); if (o && typeof o === 'object') s = Object.assign(fresh(), o); } catch (e) { /* start fresh */ }
   for (const q of QUESTS) if (!s.quest[q.id]) s.quest[q.id] = { step: 0, done: false };
+  const oldtown = !plan.zone || plan.zone === 'oldtown';        // quests and Sibu's jobs belong to the Old Town; the other areas have places to discover
+  const meta = (id) => (plan.spotInfo && plan.spotInfo[id]) || { label: SPOT_LABELS[id], text: SPOT_TEXT[id], xp: 0 };
   const stalls = new Map(plan.stalls.map((t) => [t.key, t]));
   const npcs = new Map(plan.npcs.map((n) => [n.id, n]));
   const out = [];                 // lines produced by the current call
@@ -184,7 +186,7 @@ export function createMissions({ plan, spots, load, save, hour, rng = Math.rando
       begin();
       const it = ITEMS[key], stall = stalls.get(key);
       if (!it || !stall) return done();
-      const jobHere = s.job && s.job.stage === 'buy' && s.job.key === key;
+      const jobHere = oldtown && s.job && s.job.stage === 'buy' && s.job.key === key;
       if (jobHere) {
         s.job.stage = 'carry'; s.bag.job = key;
         say(`Sibu's tab: you pick up ${it.name} for ${s.job.dest.name}. Take it there before it gets cold.`);
@@ -209,17 +211,26 @@ export function createMissions({ plan, spots, load, save, hour, rng = Math.rando
     // Arrive at a place of interest (the client calls this once per visit, when you walk into its circle)
     spot(id) {
       begin();
-      const first = !s.spotsSeen[id];
+      const first = !s.spotsSeen[id], m = meta(id);
       s.spotsSeen[id] = 1;
-      if (first) { say(`You reach the ${SPOT_LABELS[id]}.`); if (SPOT_TEXT[id]) say(SPOT_TEXT[id]); }
-      if (id === 'lingaraja' && (s.bag.flowers || 0) > 0) {
+      if (first) {
+        say(oldtown ? `You reach the ${m.label}.` : `Discovered: ${m.label}.`);
+        if (m.text) say(m.text);
+        if (!oldtown && m.xp) give(0, m.xp, 'Discovery');
+        if (!oldtown && plan.spots.every((sp) => s.spotsSeen[sp.id]) && !s.zoneDone[plan.zone]) {
+          s.zoneDone[plan.zone] = 1;
+          give(40, 60, 'Explored ' + plan.name);
+          say('Find the auto stand to visit another part of Bhubaneswar.');
+        }
+      }
+      if (oldtown && id === 'lingaraja' && (s.bag.flowers || 0) > 0) {
         const inOffering = currentQuest() && currentQuest().id === 'offering';
         s.bag.flowers--;
         say('You lay the marigold garland at the gate with folded hands.');
         if (!inOffering) give(0, 10, 'Blessing');
         advance({ k: 'offer', id });
       }
-      deliver('spot', id);
+      if (oldtown) deliver('spot', id);
       advance({ k: 'spot', id });
       return done();
     },
@@ -242,6 +253,7 @@ export function createMissions({ plan, spots, load, save, hour, rng = Math.rando
     },
 
     objective() { return objective(); },
+    discovered: () => Object.keys(s.spotsSeen).length,
     tick() { return null; },
   };
 
@@ -263,6 +275,13 @@ export function createMissions({ plan, spots, load, save, hour, rng = Math.rando
       if (t.stall) { const st = stalls.get(t.stall); return st && { x: st.x, z: st.z }; }
       return null;
     };
+    if (!oldtown) {
+      if (j) return { kind: 'job', title: 'Delivery for Sibu', text: 'Your delivery is waiting in the Old Town. Take an auto back there.' };
+      const next = plan.spots.find((sp) => !s.spotsSeen[sp.id]);
+      const left = plan.spots.filter((sp) => !s.spotsSeen[sp.id]).length;
+      if (next) return { kind: 'quest', title: 'Explore ' + (plan.short || plan.name), text: `Discover: ${next.label} (${plan.spots.length - left}/${plan.spots.length})`, x: next.x, z: next.z };
+      return { kind: 'free', title: 'Explored ' + (plan.short || plan.name), text: 'Find the auto stand to visit another part of Bhubaneswar', x: plan.travel && plan.travel.x, z: plan.travel && plan.travel.z };
+    }
     if (j) {
       if (j.stage === 'buy') { const st = stalls.get(j.key); return { kind: 'job', title: 'Delivery for Sibu', text: `Get ${ITEMS[j.key].name} at the ${st.label} stall`, x: st.x, z: st.z }; }
       const d = j.dest.k === 'npc' ? npcs.get(j.dest.id) : spots[j.dest.id];

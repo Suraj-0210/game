@@ -7,6 +7,8 @@ import { hourAt, clockText, skyAt } from './bbsr_time.js';
 import { createNightSky, collectLights, createLightGlow, createBeacon } from './bbsr_night.js';
 import { createMissions, spotsFromPlan, ITEMS, SPOT_LABELS, QUEST_LIST, isNight } from './bbsr_missions.js';
 import { buildCity } from './bbsr_mesh.js';
+import { ZONES, ZONE_BY_ID, zoneId, zoneRoom, buildZonePlan } from './bbsr_zones.js';
+import { buildZoneExtras } from './bbsr_zone_mesh.js';
 import { makeCityTextures } from './bbsr_tex.js';
 import { makeTextures } from './textures.js';
 import { createHUD } from './hud.js';
@@ -24,6 +26,8 @@ const isTouch = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart'
 if (isTouch) document.body.classList.add('touch');
 // quality: phones get the lighter settings automatically; add ?lite to the URL on any device to force them
 const LITE = isTouch || new URLSearchParams(location.search).has('lite');
+const ZONE = zoneId(new URLSearchParams(location.search).get('zone'));   // which area of Bhubaneswar this page shows
+document.title = ZONE_BY_ID[ZONE].name + ' · Bhubaneswar';
 
 const FOG_COLOR = 0xdde8f1, FOG_NEAR = 70, FOG_FAR = 900;
 const UNDER_COLOR = 0x0a4f73;
@@ -75,7 +79,7 @@ const nightFill = new THREE.HemisphereLight(0x5b73c0, 0x1b1f30, 0);
 scene.add(nightFill);
 const nightSky = createNightSky(THREE); scene.add(nightSky.group);
 const beacon = createBeacon(THREE); scene.add(beacon.group);
-let glow = null;
+let glow = null, zoneMats = null;
 if (!LITE) {
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -140,7 +144,7 @@ function blocked(x, z, pr, py) {
 }
 // Walking surface: natural terrain, or a town deck if one is higher
 // refY (your feet height) picks the right hotel floor: an upper floor never pulls you up from below
-function ground() { return 0; }   // the Old Town is flat
+function ground(x, z) { return plan && plan.height ? plan.height(x, z) : 0; }   // flat everywhere except the Khandagiri hill
 // Same formula as the water shader, so boats float on the visible waves
 let waveAmp = 1;
 const waveHeight = (x, z, t) => waveAmp * (Math.sin(x * 0.045 + t * 0.9) * 0.35 + Math.sin(z * 0.06 - t * 0.7 + x * 0.02) * 0.28 + Math.sin((x + z) * 0.11 + t * 1.4) * 0.12);
@@ -150,7 +154,7 @@ let waterUniforms = null;
 // ======================= vegetation =======================
 let vegetation = null;
 function buildVegetation() {
-  const data = { palms: plan.trees.palms, broad: plan.trees.broad, pines: [], rocks: [] };
+  const data = { palms: plan.trees.palms, broad: plan.trees.broad, pines: [], rocks: plan.trees.rocks };
   const ground = { shrubs: [], ferns: [], grass: [] };
   vegetation = createVegetation({ THREE, mergeGeometries, tex, scene, data, ground, lite: LITE, shadows: !LITE, addCollider, wind: windU });
 }
@@ -180,6 +184,7 @@ function applyTime(camPos, t, cover) {
   nightFill.intensity = 0.9 * ts.night * (1 - 0.5 * cover);
   if (Math.abs(ts.env - lastEnv) > 0.003) { for (const m of envMats) m.envMapIntensity = m.userData.envBase * ts.env; lastEnv = ts.env; }
   if (town && town.mats) { town.mats.lamp.emissiveIntensity = 0.12 + 3.4 * ts.lampOn; town.mats.stone.emissiveIntensity = 0.5 * ts.lampOn; }
+  if (zoneMats) zoneMats.glass.emissiveIntensity = 1.0 * ts.lampOn;
   nightSky.update(camPos, ts, cover);
   if (glow) glow.update(camPos, ts.lampOn, cover, t, frameNo % 8 === 0);
 }
@@ -280,10 +285,10 @@ function spawn() {
   for (let tries = 0; tries < 60; tries++) {
     const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * sp.r, x = sp.x + Math.cos(a) * r, z = sp.z + Math.sin(a) * r;
     if (blocked(x, z, PR + 0.3)) continue;
-    player.x = x; player.z = z; player.y = 0; player.vy = 0; player.yaw = sp.yaw;
+    player.x = x; player.z = z; player.y = ground(x, z); player.vy = 0; player.yaw = sp.yaw;
     return;
   }
-  player.x = sp.x; player.z = sp.z; player.y = 0; player.yaw = sp.yaw;
+  player.x = sp.x; player.z = sp.z; player.y = ground(sp.x, sp.z); player.yaw = sp.yaw;
 }
 function moveH(dx, dz) {
   const ox = player.x, oz = player.z, nx = ox + dx, nz = oz + dz;
@@ -405,6 +410,7 @@ function interact() {
       rearmSpots();
     }
   }
+  else if (nearest.type === 'travel') openTravel();
   else if (nearest.type === 'stall' && missions) { const lines = missions.buy(nearest.key); showLines([nearest.text, ...lines], 7000); rearmSpots(); }
   else if (nearest.text) hud.toast(nearest.text, 8000);
   else hud.toast(INTERACT_MSG[nearest.type] || `${nearest.label}: coming soon`);
@@ -422,7 +428,7 @@ function showLines(lines, ms = 4200) {
 }
 function rearmSpots() { spotArmed = {}; }
 function initMissions() {
-  const spots = spotsFromPlan(plan, { COMPOUND, LAKE, MAHAKALA });
+  const spots = ZONE === 'oldtown' ? spotsFromPlan(plan, { COMPOUND, LAKE, MAHAKALA }) : Object.fromEntries(plan.spots.map((s) => [s.id, { x: s.x, z: s.z, r: s.r }]));
   spotList = Object.entries(spots).map(([id, p]) => ({ id, ...p }));
   missions = createMissions({
     plan, spots, hour: () => curHour,
@@ -483,7 +489,7 @@ function renderJournal() {
   }).join('');
   const menu = Object.entries(ITEMS).map(([k, it]) => `<span>${it.name}</span><span>${it.price} coins</span>`).join('');
   $('jbox').innerHTML = `<h2>Journal</h2>
-    <div class="stats"><span>\u{1FA99} ${st.coins} coins</span><span>Level ${lv} · ${missions.levelName()}</span><span>${st.xp} XP</span><span>${st.jobsDone} deliveries</span></div>
+    <div class="stats"><span>\u{1FA99} ${st.coins} coins</span><span>Level ${lv} · ${missions.levelName()}</span><span>${st.xp} XP</span><span>${st.jobsDone} deliveries</span><span>${missions.discovered()} places found</span></div>
     <h3>Quests</h3>${quests}
     <h3>Your bag</h3><div>${bag.length ? bag.join(' · ') : 'Empty'}</div>
     <h3>Bazaar prices</h3><div class="menu">${menu}</div>
@@ -500,6 +506,33 @@ function toggleJournal(force) {
   $('journal').classList.toggle('open', open);
   if (open) { for (const k in keys) keys[k] = false; document.exitPointerLock?.(); renderJournal(); }
   else if (!isTouch) { try { renderer.domElement.requestPointerLock(); } catch (e) { /* the overlay offers Play */ } }
+}
+// ======================= travel by auto-rickshaw =======================
+let travelOpen = false, travelling = false;
+function openTravel() {
+  if (travelOpen || travelling) return;
+  travelOpen = true; for (const k in keys) keys[k] = false; document.exitPointerLock?.();
+  const rows = ZONES.map((z) => {
+    const here = z.id === ZONE;
+    return `<button class="tz ${here ? 'here' : ''}" data-z="${z.id}" ${here ? 'disabled' : ''}><span class="ic">${z.icon}</span><span class="tx"><b>${z.name}</b><span>${z.blurb}</span></span><span class="km">${here ? 'You are here' : (z.km ? '~' + Math.abs(z.km - (ZONE_BY_ID[ZONE].km || 0)) + ' km' : 'Start')}</span></button>`;
+  }).join('');
+  $('tbox').innerHTML = `<h2>Where to?</h2><div class="sub">Raju the auto driver can take you anywhere in Bhubaneswar. The ride is free.</div><div class="tlist">${rows}</div><div class="row"><button id="tClose">Stay here</button></div>`;
+  $('travel').classList.add('open');
+  $('tClose').onclick = closeTravel;
+  $('tbox').querySelectorAll('.tz').forEach((b) => { b.onclick = () => travelTo(b.dataset.z); });
+}
+function closeTravel() {
+  if (!travelOpen) return;
+  travelOpen = false; $('travel').classList.remove('open');
+  if (!isTouch) { try { renderer.domElement.requestPointerLock(); } catch (e) { /* the overlay offers Play */ } }
+}
+function travelTo(id) {
+  if (travelling || !ZONE_BY_ID[id] || id === ZONE) return;
+  travelling = true;
+  $('tbox').innerHTML = `<h2>${ZONE_BY_ID[id].icon} Off to ${ZONE_BY_ID[id].short}...</h2><div class="sub">Hold on tight. Tr-r-r-ring!</div>`;
+  const u = new URL(location.href);
+  if (id === 'oldtown') u.searchParams.delete('zone'); else u.searchParams.set('zone', id);
+  setTimeout(() => { location.href = u.toString(); }, 900);
 }
 const clockLine = () => {
   const night = isNight(curHour);
@@ -590,7 +623,7 @@ const hud = createHUD({
   onInteract: () => { if (active()) interact(); },
   onChatSubmit: (text, scope) => { if (socket) socket.emit('chat', { text, scope }); closeChat(); },
 });
-const active = () => ready && overlay.style.display === 'none' && !hud.isChatOpen() && !customizer.isOpen() && !journalOpen;
+const active = () => ready && overlay.style.display === 'none' && !hud.isChatOpen() && !customizer.isOpen() && !journalOpen && !travelOpen;
 function rebuildSelf() {
   if (selfAvatar) disposeAvatar(selfAvatar);
   selfAvatar = makeAvatar(myCfg, name, false);
@@ -643,10 +676,13 @@ playBtn.addEventListener('click', () => {
 });
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === renderer.domElement;
-  if (!locked && !isTouch && ready && !hud.isChatOpen() && !hud.isBigMap() && !customizer.isOpen() && !journalOpen) overlay.style.display = 'flex';
+  if (!locked && !isTouch && ready && !hud.isChatOpen() && !hud.isBigMap() && !customizer.isOpen() && !journalOpen && !travelOpen) overlay.style.display = 'flex';
 });
-document.addEventListener('pointerlockerror', () => { if (ready && !hud.isChatOpen() && !customizer.isOpen() && !journalOpen) overlay.style.display = 'flex'; });
-addEventListener('keydown', (e) => { if (journalOpen && (e.code === 'KeyJ' || e.code === 'Escape')) { e.preventDefault(); toggleJournal(false); } });
+document.addEventListener('pointerlockerror', () => { if (ready && !hud.isChatOpen() && !customizer.isOpen() && !journalOpen && !travelOpen) overlay.style.display = 'flex'; });
+addEventListener('keydown', (e) => {
+  if (journalOpen && (e.code === 'KeyJ' || e.code === 'Escape')) { e.preventDefault(); toggleJournal(false); }
+  else if (travelOpen && e.code === 'Escape') { e.preventDefault(); closeTravel(); }
+});
 addEventListener('keydown', (e) => {
   if (hud.isChatOpen() || !active()) return;
   keys[e.code] = true;
@@ -733,7 +769,7 @@ function connect() {
   try { localStorage.setItem('vw_name', name); } catch (e) { /* ignore */ }
 
   socket = io();
-  socket.on('connect', () => { statusEl.textContent = 'Joining...'; socket.emit('join', { name, avatar: myCfg, world: 'bbsr' }); });
+  socket.on('connect', () => { statusEl.textContent = 'Joining...'; socket.emit('join', { name, avatar: myCfg, world: zoneRoom(ZONE) }); });
   socket.on('disconnect', () => {
     ready = false; playBtn.disabled = true;
     overlay.style.display = 'flex';
@@ -747,7 +783,7 @@ function connect() {
     for (const id of doorBoxes.keys()) setDoorOpen(id, !!(doors && doors[id]), false);
     for (const id of [...others.keys()]) removeOther(id);
     voice.setSelf(selfId);
-    if (!spawned) { spawn(); spawned = true; }
+    if (!spawned) { spawn(); spawned = true; hud.toast('Welcome to ' + ZONE_BY_ID[ZONE].name + (ZONE === 'oldtown' ? '' : '. Find the auto stand to go back.'), 4200); }
     rebuildSelf();
     for (const p of Object.values(players)) if (p.id !== selfId) addOther(p);
     ready = true;
@@ -834,7 +870,7 @@ function frame(now) {
     if (vegetation && frameNo % 8 === 1) vegetation.update(player.x, player.z);
     if (frameNo % 6 === 3) {
       const h = ground(player.x, player.z, player.y);
-      audio.update({ indoors, wind: wx.wind, gust: wx.gust, rain: wx.rain, storm: wx.storm, cover: wx.cover, water: 0.3 * Math.max(0, Math.min(1, (1.5 - lakeValue(player.x, player.z)) / 0.5)), forest: 0.3, underwater: false });
+      audio.update({ indoors, wind: wx.wind, gust: wx.gust, rain: wx.rain, storm: wx.storm, cover: wx.cover, water: plan.lake ? 0.3 * Math.max(0, Math.min(1, (1.5 - lakeValue(player.x, player.z)) / 0.5)) : 0, forest: 0.3, underwater: false });
     }
     if (frameNo % 30 === 11) $('wx').textContent = clockLine();
     if (frameNo % 6 === 1) { checkSpots(); updateQuestDistance(); }
@@ -855,9 +891,10 @@ const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeou
 async function boot() {
   statusEl.textContent = 'Surveying Old Town...'; await nextFrame();
   let osm = null;   // real OpenStreetMap streets and buildings, if tools/fetch_osm.mjs has been run
-  try { const r = await fetch('/data/oldtown_osm.json'); if (r.ok) osm = await r.json(); } catch (e) { /* none: use the hand-drawn layout */ }
-  plan = buildPlan(osm);
-  { const c = document.createElement('div'); c.style.cssText = 'opacity:.55;font-size:11px;margin-top:6px'; c.textContent = plan.osm ? 'Map data \u00a9 OpenStreetMap contributors' : 'Street layout: hand-drawn alpha (run tools/fetch_osm.mjs for the real OpenStreetMap streets)'; $('help').appendChild(c); }
+  if (ZONE === 'oldtown') { try { const r = await fetch('/data/oldtown_osm.json'); if (r.ok) osm = await r.json(); } catch (e) { /* none: use the hand-drawn layout */ } }
+  plan = ZONE === 'oldtown' ? buildPlan(osm) : buildZonePlan(ZONE);
+  plan.short = ZONE_BY_ID[ZONE].short;
+  { const c = document.createElement('div'); c.style.cssText = 'opacity:.55;font-size:11px;margin-top:6px'; c.textContent = ZONE !== 'oldtown' ? ZONE_BY_ID[ZONE].name + ': a hand-drawn approximation of the real place (landmarks right, exact street layout not surveyed).' : plan.osm ? 'Map data \u00a9 OpenStreetMap contributors' : 'Street layout: hand-drawn alpha (run tools/fetch_osm.mjs for the real OpenStreetMap streets)'; $('help').appendChild(c); }
   statusEl.textContent = 'Planting trees...'; await nextFrame();
   buildVegetation();
   clouds = createClouds(THREE, { puff: tex.puff, noise: tex.noise, count: LITE ? 26 : 46 }); scene.add(clouds.group);
@@ -865,6 +902,7 @@ async function boot() {
   statusEl.textContent = 'Raising the temples...'; await nextFrame();
   town = buildCity({ THREE, mergeGeometries }, plan, tex, { shadows: !LITE });
   scene.add(town.group);
+  if (ZONE !== 'oldtown') { const ex = buildZoneExtras({ THREE, mergeGeometries }, plan, tex, town.mats.M, { shadows: !LITE }); town.group.add(ex.group); zoneMats = ex.mats; }
   plan.boxes.forEach(addBoxCollider);
   plan.circles.forEach((c) => addCollider(c.x, c.z, c.r, c.y0, c.y1));
   buildNpcs();
@@ -878,6 +916,6 @@ async function boot() {
   statusEl.textContent = 'Connecting to server...'; await nextFrame();
   connect();
 }
-window.__vw = { scene, camera, renderer, player, keys, hud, voice, setDoorOpen, doorOpen, get indoors() { return indoors; }, npcs, wx, setWeather: (m) => { weatherMode = m; wxInit = false; }, setWind: (v) => { windOverride = v; }, get vegetation() { return vegetation; }, get plan() { return plan; }, ground, blocked, setEmote, interact, get nearest() { return nearest; }, get missions() { return missions; }, get ts() { return ts; }, get hour() { return curHour; }, setTime: (h) => { todOverride = h; }, showLines, checkSpots, get glow() { return glow; }, get beacon() { return beacon; }, toggleJournal };
+window.__vw = { scene, camera, renderer, player, keys, hud, voice, setDoorOpen, doorOpen, get indoors() { return indoors; }, npcs, wx, setWeather: (m) => { weatherMode = m; wxInit = false; }, setWind: (v) => { windOverride = v; }, get vegetation() { return vegetation; }, get plan() { return plan; }, ground, blocked, setEmote, interact, get nearest() { return nearest; }, get missions() { return missions; }, ZONE, openTravel, travelTo, get travelOpen() { return travelOpen; }, get ts() { return ts; }, get hour() { return curHour; }, setTime: (h) => { todOverride = h; }, showLines, checkSpots, get glow() { return glow; }, get beacon() { return beacon; }, toggleJournal };
 requestAnimationFrame(frame);
 boot().catch((e) => { statusEl.textContent = 'Error: ' + e.message; console.error(e); });

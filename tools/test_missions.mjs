@@ -92,4 +92,24 @@ g.state.coins = 5; const poor = g.buy('chhena'); show('too poor', poor); assert.
 const g2 = mk(rng); assert.equal(g2.state.jobsDone, 6); assert.equal(g2.currentQuest(), null);
 assert.equal(levelOf(0), 1); assert.equal(levelOf(xpForLevel(3)), 3); assert.equal(levelOf(xpForLevel(3) - 1), 2);
 console.log('xp', g2.state.xp, 'level', g2.level(), g2.levelName());
+
+// 10) the other areas: discovery XP, zone bonus, no Old Town jobs there, tracker points at the next place
+import { buildZonePlan, ZONES } from '../public/bbsr_zones.js';
+for (const z of ZONES.filter((q) => q.id !== 'oldtown')) {
+  const zp = buildZonePlan(z.id); zp.short = z.short;
+  const zs = Object.fromEntries(zp.spots.map((s) => [s.id, { x: s.x, z: s.z, r: s.r }]));
+  let mem2 = null;
+  const zg = createMissions({ plan: zp, spots: zs, load: () => mem2, save: (s) => { mem2 = JSON.parse(JSON.stringify(s)); }, hour: () => 12, rng });
+  let o = zg.objective(); assert.equal(o.x, zp.spots[0].x, z.id + ': tracker points at the first place');
+  const xp0 = zg.state.xp, c0 = zg.state.coins;
+  let lines = [];
+  for (const sp of zp.spots) lines.push(...zg.spot(sp.id));
+  assert.ok(zg.state.xp > xp0 + 40, z.id + ': discoveries give XP');
+  assert.ok(zg.state.coins >= c0 + 40, z.id + ': exploring everything pays the zone bonus');
+  assert.ok(lines.some((l) => /^Explored /.test(l) || /Explored/.test(l)), z.id + ': completion message');
+  assert.equal(zg.objective().kind, 'free');
+  assert.equal(zg.spot(zp.spots[0].id).length, 0, z.id + ': revisiting says nothing');
+  const first = zp.stalls[0].key, b = zg.buy(first); assert.ok(/enjoy|Bought/.test(b[0]), z.id + ': stalls sell');
+  console.log('zone', z.id.padEnd(11), zp.spots.length, 'places,', zp.stalls.length, 'stalls, xp', zg.state.xp, 'coins', zg.state.coins);
+}
 console.log('ALL OK');

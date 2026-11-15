@@ -14,8 +14,8 @@ app.use(express.static(path.join(__dirname, "public")));
 app.use("/three", express.static(path.join(__dirname, "node_modules/three")));
 
 // Diagnostics: open /health on your site to see which version is live and whether any game file is missing.
-const BUILD = "2026-11-13 island + Bhubaneswar Old Town (alpha: quests, jobs, day and night)";
-const REQUIRED = ["bhubaneswar.html", "bbsr.js", "bbsr_plan.js", "bbsr_mesh.js", "bbsr_tex.js", "bbsr_missions.js", "bbsr_night.js", "bbsr_time.js", "index.html", "main.js", "island.js", "textures.js", "town.js", "townmesh.js", "hotel.js", "interiors.js", "hud.js", "avatar.js", "customize.js", "weather.js", "atmosphere.js", "audio.js", "foliage.js", "vegetation.js", "voice.js"];
+const BUILD = "2026-11-13 island + Bhubaneswar Old Town (alpha: quests, jobs, day and night, 6 more areas)";
+const REQUIRED = ["bhubaneswar.html", "bbsr.js", "bbsr_plan.js", "bbsr_mesh.js", "bbsr_tex.js", "bbsr_missions.js", "bbsr_zones.js", "bbsr_zone_mesh.js", "bbsr_night.js", "bbsr_time.js", "index.html", "main.js", "island.js", "textures.js", "town.js", "townmesh.js", "hotel.js", "interiors.js", "hud.js", "avatar.js", "customize.js", "weather.js", "atmosphere.js", "audio.js", "foliage.js", "vegetation.js", "voice.js"];
 app.get(["/bhubaneswar", "/bbsr"], (req, res) => res.sendFile(path.join(__dirname, "public", "bhubaneswar.html")));
 app.get("/health", (req, res) => {
   const files = {};
@@ -28,7 +28,7 @@ const LIMIT = 2000;
 const NEARBY = 45; // metres for nearby chat
 const COLORS = [0xd63031, 0x0984e3, 0x00b894, 0xfdcb6e, 0x6c5ce7, 0xe84393, 0xe17055, 0x00cec9];
 const players = {};
-const WORLDS = ["island", "bbsr"];   // bbsr = Bhubaneswar Old Town
+const WORLDS = ["island", "bbsr", "khandagiri", "baramunda", "jaydev", "vanivihar", "rasulgarh", "patia"];   // bbsr = Bhubaneswar Old Town; the rest are the other areas of the city
 // hotel doors that are currently open (id -> true). Open doors close by themselves after a while.
 const doors = {}, doorTimers = {};
 const DOOR_OPEN_MS = 45000;

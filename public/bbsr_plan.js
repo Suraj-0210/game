@@ -329,7 +329,7 @@ export function buildPlan(osm = null) {
   });
 
   // ------------- edges of the playable area -------------
-  const HO = [['CHAPTER 1 · OLD TOWN', 'Next: Janpath · Master Canteen · Khandagiri'], ['CHAPTER 1 · OLD TOWN', 'More of Bhubaneswar is coming'], ['CHAPTER 1 · OLD TOWN', 'The city continues. We are still building it.'], ['CHAPTER 1 · OLD TOWN', 'Next: Udayagiri · Dhauli · Nandankanan']];
+  const HO = [['CHAPTER 1 · OLD TOWN', 'More of the city: take an auto from the plaza stand'], ['CHAPTER 1 · OLD TOWN', 'Khandagiri · Baramunda · Jaydev Vihar · Vani Vihar'], ['CHAPTER 1 · OLD TOWN', 'Rasulgarh · Patia · Infocity: all by auto'], ['CHAPTER 1 · OLD TOWN', 'The auto stand is on the plaza outside the Lingaraja gate']];
   [[0, -EDGE, 0], [0, EDGE, Math.PI], [-EDGE, 0, Math.PI / 2], [EDGE, 0, -Math.PI / 2]].forEach(([x, z, yaw], i) => {
     for (let k = -2; k <= 2; k++) {
       const px = x + (i < 2 ? k * 120 : 0), pz = z + (i < 2 ? 0 : k * 120);
@@ -337,6 +337,11 @@ export function buildPlan(osm = null) {
     }
   });
 
+  // the auto stand on the plaza: the way to the other areas of the city
+  plan.travel = { x: 60, z: 214, yaw: 0 };
+  plan.circles.push({ x: 60, z: 211.8, r: 0.3, y0: 0, y1: 3 });
+  plan.interactables.push({ id: 'travel_stand', type: 'travel', x: 60, z: 214, y: 0, radius: 4.2, dy: 3, label: 'Take an auto to another area' });
+  plan.landmarks.push({ name: 'Auto stand (travel)', kind: 'games', x: 60, z: 214 });
   plan.spawn = { x: 86, z: 186, yaw: Math.PI / 2, r: 7 };   // on the plaza, looking west through the gate at the tower
   plan.landmarks = [
     { name: 'Lingaraja Temple', kind: 'temple', x: LINGARAJ.x, z: LINGARAJ.z },

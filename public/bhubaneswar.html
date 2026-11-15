@@ -154,6 +154,18 @@
   #jbox .row { display: flex; gap: 10px; margin-top: 16px; } #jbox button { padding: 9px 16px; border-radius: 10px; border: 1px solid var(--line); background: rgba(255,255,255,.1); color: #fff; font-weight: 600; cursor: pointer; font-size: 13px; }
   #jbox button.main { background: #2f7bff; border-color: transparent; }
 
+
+  /* auto-rickshaw travel menu */
+  #travel { position: fixed; inset: 0; z-index: 41; background: rgba(5,10,18,.78); display: none; align-items: center; justify-content: center; padding: 12px; }
+  #travel.open { display: flex; }
+  #tbox { width: min(520px, 100%); max-height: 88vh; overflow: auto; background: rgba(14,26,42,.97); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; }
+  #tbox h2 { margin: 0 0 4px; font-size: 20px; } #tbox .sub { opacity: .75; font-size: 13px; margin-bottom: 12px; }
+  .tlist { display: flex; flex-direction: column; gap: 6px; }
+  .tz { display: flex; align-items: center; gap: 12px; text-align: left; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.07); color: #fff; cursor: pointer; font-size: 14px; }
+  .tz:hover:not([disabled]) { background: #2f7bff; border-color: transparent; } .tz[disabled] { opacity: .5; cursor: default; }
+  .tz .ic { font-size: 24px; } .tz .tx { flex: 1; display: flex; flex-direction: column; } .tz .tx span { font-size: 12px; opacity: .8; } .tz .km { font-size: 12px; opacity: .8; white-space: nowrap; }
+  #tbox .row { display: flex; margin-top: 14px; } #tbox .row button { padding: 9px 16px; border-radius: 10px; border: 1px solid var(--line); background: rgba(255,255,255,.1); color: #fff; font-weight: 600; cursor: pointer; font-size: 13px; }
+
   /* touch controls */
   #touchpad { position: fixed; inset: 0; z-index: 4; display: none; }
   #stick { position: fixed; width: 100px; height: 100px; margin: -50px 0 0 -50px; border-radius: 50%; border: 2px solid rgba(255,255,255,.4); z-index: 5; display: none; pointer-events: none; }
@@ -194,6 +206,7 @@
   <div id="qKey">J journal · T time of day</div>
 </div>
 <div id="journal"><div id="jbox"></div></div>
+<div id="travel"><div id="tbox"></div></div>
 <div id="toast"></div>
 
 <div id="touchpad"></div>
@@ -214,7 +227,7 @@
     <button id="play" disabled>Play</button><button id="playCustom">👤 Customize avatar</button>
     <div id="help">
       Chapter 1: Ekamra Kshetra, the temple quarter. Walk the bazaar, sit by Bindusagar, find the Lingaraja Temple.<br><b>Desktop:</b> <kbd>WASD</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>E</kbd> interact · <kbd>1</kbd>-<kbd>9</kbd> emotes<br>
-      <kbd>V</kbd> first / third person · <kbd>M</kbd> big map · <kbd>C</kbd> avatar · <kbd>F</kbd> fly · <kbd>Enter</kbd> chat · <kbd>K</kbd> change weather · <kbd>T</kbd> time of day · <kbd>J</kbd> journal (quests, coins) · <kbd>O</kbd> sound · <kbd>G</kbd> microphone (nearby players hear you)<br>
+      <kbd>V</kbd> first / third person · <kbd>M</kbd> big map · <kbd>C</kbd> avatar · <kbd>F</kbd> fly · <kbd>Enter</kbd> chat · <kbd>K</kbd> change weather · <kbd>T</kbd> time of day · <kbd>J</kbd> journal (quests, coins) · <kbd>E</kbd> at an auto stand to travel · <kbd>O</kbd> sound · <kbd>G</kbd> microphone (nearby players hear you)<br>
       <div id="build" style="opacity:.5;font-size:11px;margin-top:6px"></div>
       <b>Phone:</b> left thumb moves · drag right side to look · tap the minimap to enlarge it
     </div>

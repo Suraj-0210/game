@@ -4,7 +4,7 @@ import { hoardingTexture } from './bbsr_tex.js';
 import { LAKE, lakeRing, lakeValue, COMPOUND, WORLD } from './bbsr_plan.js';
 
 // ---------- a growable triangle batch: boxes, flat quads, ribbons, lofted surfaces ----------
-class Batch {
+export class Batch {
   constructor(THREE) { this.T = THREE; this.p = []; this.n = []; this.uv = []; this.c = []; this.i = []; this.v = 0; this.cache = new Map(); }
   col(hex) { let c = this.cache.get(hex); if (!c) { const k = new this.T.Color(hex); c = [k.r, k.g, k.b]; this.cache.set(hex, c); } return c; }
   vert(x, y, z, nx, ny, nz, u, v, c) { this.p.push(x, y, z); this.n.push(nx, ny, nz); this.uv.push(u, v); this.c.push(c[0], c[1], c[2]); return this.v++; }
@@ -85,7 +85,7 @@ class Batch {
 
 // ---------- Kalinga temple parts ----------
 // rekha deul: a square body (bada) and a tall curved tower (gandi) that narrows to a ribbed disc (amalaka) and a pot finial (kalasa)
-function rekha(B, G, cx, cz, w, H, yaw, o = {}) {
+export function rekha(B, G, cx, cz, w, H, yaw, o = {}) {
   const STONE = o.stone || 0xf4e6cc, levels = o.levels || 44, M = o.sides || 72, bodyH = H * 0.27, cy = Math.cos(yaw), sy = Math.sin(yaw);
   const rot = (x, z) => [cx + x * cy + z * sy, cz - x * sy + z * cy];
   // lower body: base mouldings, the wall with a projecting panel on each side, a cornice
@@ -139,7 +139,7 @@ function rekha(B, G, cx, cz, w, H, yaw, o = {}) {
 }
 
 // pidha deul / mandapa: a stone block under a stepped pyramid roof
-function pidha(B, G, cx, cz, w, d, h, tiers, yaw, o = {}) {
+export function pidha(B, G, cx, cz, w, d, h, tiers, yaw, o = {}) {
   const STONE = o.stone || 0xf2e2c6, baseH = o.noBase ? 0 : h * 0.5, th = (h - baseH) / tiers;
   if (!o.noBase) { B.box(cx, cz, 0, w * 1.04, 0.9, d * 1.04, yaw, STONE); B.box(cx, cz, 0.9, w, baseH - 0.9, d, yaw, STONE); }
   let y = (o.y0 || 0) + baseH;
@@ -202,12 +202,14 @@ export function buildCity({ THREE, mergeGeometries }, plan, tex, opts = {}) {
   }
   for (const p of plan.pave) pave.flat((p.x0 + p.x1) / 2, (p.z0 + p.z1) / 2, 0.05, p.x1 - p.x0, p.z1 - p.z0, 0, 0xffffff, 6);
   // the walkway around the tank
-  const inner = lakeRing(1.9, 260), outer = offsetRing(inner, 6.6);
-  for (let i = 0; i < inner.length; i++) { const j = (i + 1) % inner.length; pave.flatQuad(inner[i], inner[j], outer[j], outer[i], 0.06, 0xffffff, 6); }
+  if (plan.lake) {
+    const inner = lakeRing(1.9, 260), outer = offsetRing(inner, 6.6);
+    for (let i = 0; i < inner.length; i++) { const j = (i + 1) % inner.length; pave.flatQuad(inner[i], inner[j], outer[j], outer[i], 0.06, 0xffffff, 6); }
+  }
   add(road.mesh(M.asphalt, false)); add(marks.mesh(M.marks, false)); add(pave.mesh(M.paving, false));
 
   // ----- Bindusagar: embankment, water -----
-  {
+  if (plan.lake) {
     const lat = new Batch(THREE), ring = lakeRing(1.3, 320);
     for (let i = 0; i < ring.length; i++) {
       const a = ring[i], b = ring[(i + 1) % ring.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]), yaw = Math.atan2(-(b[1] - a[1]), b[0] - a[0]);
@@ -230,7 +232,7 @@ export function buildCity({ THREE, mergeGeometries }, plan, tex, opts = {}) {
     lat2.box(w.x, w.z, 0, w.hw * 2, w.h, w.hd * 2, 0, 0xffffff);
     stone.box(w.x, w.z, w.h, w.hw * 2 + 0.3, 0.45, w.hd * 2 + 0.3, 0, 0xf0dcbc);
   }
-  {
+  if (plan.gate) {
     const g = plan.gate, gapW = g.w / 2;
     for (const s of [-1, 1]) { stone.box(g.x, g.z + s * (gapW + 2.5), 0, 6.4, 7, 5, 0, 0xf0dcbc); stone.box(g.x, g.z + s * (gapW + 2.5), 7, 7, 0.5, 5.6, 0, 0xe6d2ae); }
     stone.box(g.x, g.z, 5.0, 6.4, 2.5, g.w + 0.1, 0, 0xf0dcbc);
@@ -292,7 +294,7 @@ export function buildCity({ THREE, mergeGeometries }, plan, tex, opts = {}) {
     for (const [lx, lz] of [[-0.62, 0.7], [0.62, 0.7], [0, -1.1]]) { const q = P(lx, lz); fur.box(q[0], q[1], 0, 0.22, 0.5, 0.5, a.yaw, 0x1b1b1b, { us: 2, vs: 2 }); }
     for (const lx of [-0.62, 0.62]) { const q = P(lx, -0.6); fur.box(q[0], q[1], 0.35, 0.06, 0.75, 0.06, a.yaw, 0x1f6b3a, { us: 2, vs: 2 }); }
   }
-  {
+  if (plan.chai) {
     const ch = plan.chai;
     fur.box(ch.x, ch.z - 5, 0, 17, 3.2, 0.5, 0, 0xc2b08a); fur.box(ch.x, ch.z - 0.5, 3.2, 18, 0.2, 11, 0, 0x6b7478, { us: 2, vs: 2 });
     for (const lx of [-8.5, 8.5]) for (const lz of [-5, 4]) fur.box(ch.x + lx, ch.z + lz, 0, 0.2, 3.3, 0.2, 0, 0x5b4630, { us: 2, vs: 2 });
@@ -303,6 +305,12 @@ export function buildCity({ THREE, mergeGeometries }, plan, tex, opts = {}) {
     });
     for (const dx of [-7, 0, 7]) lampHeads.box(ch.x + dx, ch.z - 0.5, 2.95, 0.34, 0.22, 0.34, 0, 0xffffff, { us: 2, vs: 2 });   // bulbs under the tin roof
     signs.push({ x: ch.x, z: ch.z - 4.6, y: 3.9, yaw: 0, text: 'CHAI ADDA', color: '#6e4527', w: 5, flip: true });
+  }
+  if (plan.travel) {   // the auto stand: a signpost
+    const tv = plan.travel;
+    fur.box(tv.x, tv.z - 2.2, 0, 0.14, 3.4, 0.14, 0, 0x3a3f44, { us: 2, vs: 2 });
+    signs.push({ x: tv.x, z: tv.z - 2.1, y: 3.55, yaw: 0, text: 'AUTO STAND', color: '#1f6b3a', w: 3.2, flip: false });
+    signs.push({ x: tv.x, z: tv.z - 2.3, y: 3.55, yaw: Math.PI, text: 'AUTO STAND', color: '#1f6b3a', w: 3.2, flip: false });
   }
   add(fur.mesh(M.plain, shadows)); add(lampHeads.mesh(M.lamp, false));
   const signGeo = new THREE.PlaneGeometry(2.6, 0.8);
@@ -340,15 +348,22 @@ export function buildCity({ THREE, mergeGeometries }, plan, tex, opts = {}) {
     g.fillStyle = '#e7dcc6';
     for (const h of plan.houses) { g.save(); g.translate(X(h.x), Z(h.z)); g.rotate(-h.yaw); g.fillStyle = '#e9dfca'; g.fillRect((-h.w / 2) * k, (-h.d / 2) * k, h.w * k, h.d * k); g.restore(); }
     g.fillStyle = '#6f9a50'; for (const t of plan.trees.broad) { g.beginPath(); g.arc(X(t.x), Z(t.z), 2.2 * k * 2, 0, 7); g.fill(); }
-    g.beginPath(); lakeRing(0, 200).forEach(([x, z], i) => (i ? g.lineTo(X(x), Z(z)) : g.moveTo(X(x), Z(z)))); g.closePath();
-    g.fillStyle = '#4a9aa6'; g.fill(); g.strokeStyle = '#2f6f78'; g.lineWidth = 3; g.stroke();
+    if (plan.lake) {
+      g.beginPath(); lakeRing(0, 200).forEach(([x, z], i) => (i ? g.lineTo(X(x), Z(z)) : g.moveTo(X(x), Z(z)))); g.closePath();
+      g.fillStyle = '#4a9aa6'; g.fill(); g.strokeStyle = '#2f6f78'; g.lineWidth = 3; g.stroke();
+    }
+    if (plan.hill) { const hl = plan.hill; g.save(); g.fillStyle = 'rgba(133,104,72,.75)'; g.beginPath(); g.ellipse(X(hl.cx), Z(hl.cz), hl.rx * k, hl.rz * k, 0, 0, 7); g.fill(); g.fillStyle = 'rgba(170,140,100,.8)'; g.beginPath(); g.ellipse(X(hl.cx), Z(hl.cz), hl.rx * k * 0.55, hl.rz * k * 0.55, 0, 0, 7); g.fill(); g.restore(); }
+    g.fillStyle = '#9aa6b0'; for (const w of plan.towers || []) g.fillRect(X(w.x - w.w / 2), Z(w.z - w.d / 2), w.w * k, w.d * k);
+    g.fillStyle = '#8c8f94'; for (const w of plan.sheds || []) g.fillRect(X(w.x - w.w / 2), Z(w.z - w.d / 2), w.w * k, w.d * k);
+    g.strokeStyle = 'rgba(210,60,60,.85)'; g.lineWidth = 5; for (const f of plan.flyovers || []) { g.beginPath(); g.moveTo(X(f.x0), Z(f.z0)); g.lineTo(X(f.x1), Z(f.z1)); g.stroke(); }
     g.fillStyle = '#e8c47a'; for (const t of plan.temples) { if (t.kind === 'shrine') { g.fillRect(X(t.x) - 2, Z(t.z) - 2, 4, 4); } }
-    g.strokeStyle = '#6b3a28'; g.lineWidth = 3; const C = COMPOUND; g.strokeRect(X(C.cx - C.hw), Z(C.cz - C.hd), C.hw * 2 * k, C.hd * 2 * k);
+    if (plan.compound) { g.strokeStyle = '#6b3a28'; g.lineWidth = 3; const C = COMPOUND; g.strokeRect(X(C.cx - C.hw), Z(C.cz - C.hd), C.hw * 2 * k, C.hd * 2 * k); }
+    for (const w of plan.walls) { if (plan.compound) break; g.fillStyle = '#6b3a28'; g.fillRect(X(w.x - w.hw), Z(w.z - w.hd), Math.max(2, w.hw * 2 * k), Math.max(2, w.hd * 2 * k)); }
     return c;
   }
 
   return {
-    group, mapCanvas, setDoor() {}, mats: { lamp: M.lamp, stone: M.stone },
+    group, mapCanvas, setDoor() {}, mats: { lamp: M.lamp, stone: M.stone, M },
     update(t) { const nm = group.userData.waterNormal; if (nm) nm.offset.set(t * 0.012, t * 0.007); },
   };
 }
