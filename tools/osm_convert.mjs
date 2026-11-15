@@ -1,6 +1,6 @@
 // Turns an OpenStreetMap (Overpass "out geom") response into the compact JSON the game loads.
 // Local coordinates: metres from the game's origin, x = east, z = south (see public/bbsr_plan.js).
-import { project } from '../public/bbsr_plan.js';
+import { project as projectOld, ORIGIN } from '../public/bbsr_plan.js';
 
 const ROAD_WIDTH = { motorway: 14, trunk: 14, primary: 13, secondary: 12, tertiary: 10, unclassified: 8, residential: 7, living_street: 6, service: 5, pedestrian: 5 };
 const MAIN = new Set(['motorway', 'trunk', 'primary', 'secondary', 'tertiary']);
@@ -22,7 +22,14 @@ export function fitRect(pts) {
 const polyArea = (p) => { let a = 0; for (let i = 0; i < p.length; i++) { const q = p[(i + 1) % p.length]; a += p[i][0] * q[1] - q[0] * p[i][1]; } return Math.abs(a) / 2; };
 const r1 = (v) => Math.round(v * 10) / 10;
 
-export function convert(data, { limit = 495 } = {}) {
+// metres east / south of a given centre (default: the Old Town origin of the game)
+export function projector(origin = ORIGIN) {
+  if (origin === ORIGIN) return projectOld;
+  const mLat = 110574, mLon = 111320 * Math.cos((origin.lat * Math.PI) / 180);
+  return (lat, lon) => ({ x: (lon - origin.lon) * mLon, z: -(lat - origin.lat) * mLat });
+}
+export function convert(data, { limit = 495, origin = ORIGIN } = {}) {
+  const project = projector(origin);
   const roads = [], buildings = [], temples = [];
   const inside = (x, z) => Math.abs(x) <= limit && Math.abs(z) <= limit;
   for (const el of data.elements || []) {
