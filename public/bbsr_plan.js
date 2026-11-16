@@ -20,25 +20,44 @@ export const MAHAKALA = project(20.2406, 85.8347);
 
 // ---- the sacred tank (a rounded rectangle, superellipse) ----
 export const LAKE = { cx: BINDUSAGAR.x, cz: BINDUSAGAR.z, a: 200, b: 108, n: 3.2 };   // half-lengths in metres
-export const lakeValue = (x, z, grow = 0) => Math.pow(Math.abs(x - LAKE.cx) / (LAKE.a + grow), LAKE.n) + Math.pow(Math.abs(z - LAKE.cz) / (LAKE.b + grow), LAKE.n);
-export const inLake = (x, z, grow = 0) => lakeValue(x, z, grow) < 1;
+// the real shoreline of Bindusagar (OpenStreetMap), rounded a little so the edge flows
+const LAKE_RAW = [[94, -450], [107, -452], [120, -449], [138, -435], [177, -406], [209, -389], [245, -370], [230, -282], [207, -200], [197, -174], [176, -149], [134, -104], [62, -100], [10, -96], [-53, -95], [-57, -130], [-50, -171], [-30, -265], [3, -344], [13, -353], [32, -371], [50, -387], [63, -407], [65, -420], [70, -432], [81, -441]];   // the mapped south tip ran over the Mahakala temple, so the south shore is straightened
+const LAKE_POLY = (() => {
+  let pts = LAKE_RAW.slice();
+  for (let it = 0; it < 1; it++) { const o = []; for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; o.push([0.75 * a[0] + 0.25 * b[0], 0.75 * a[1] + 0.25 * b[1]], [0.25 * a[0] + 0.75 * b[0], 0.25 * a[1] + 0.75 * b[1]]); } pts = o; }
+  let ar = 0; for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; ar += a[0] * b[1] - b[0] * a[1]; }
+  return ar < 0 ? pts.reverse() : pts;           // same winding as the old ring, so the meshes face up
+})();
+// signed distance to the shore: negative in the water, positive on land
+function lakeSD(x, z) {
+  let d = 1e9, inside = false; const P = LAKE_POLY;
+  for (let i = 0, j = P.length - 1; i < P.length; j = i++) {
+    const [ax, az] = P[j], [bx, bz] = P[i];
+    if ((az > z) !== (bz > z) && x < ((bx - ax) * (z - az)) / (bz - az) + ax) inside = !inside;
+    const dx = bx - ax, dz = bz - az, t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1)));
+    d = Math.min(d, Math.hypot(x - ax - dx * t, z - az - dz * t));
+  }
+  return inside ? -d : d;
+}
+export const lakeValue = (x, z, grow = 0) => 1 + (lakeSD(x, z) - grow) / 30;       // below 1 within `grow` metres of the water
+export const inLake = (x, z, grow = 0) => lakeSD(x, z) < grow;
 // `count` points evenly spaced by arc length around the tank, `grow` metres outside the water's edge
 export function lakeRing(grow, count) {
-  const D = 6000, e = 2 / LAKE.n, dense = [], cum = [0];
-  for (let i = 0; i <= D; i++) {
-    const t = (i / D) * Math.PI * 2, c = Math.cos(t), s = Math.sin(t);
-    dense.push([LAKE.cx + (LAKE.a + grow) * Math.sign(c) * Math.pow(Math.abs(c), e), LAKE.cz + (LAKE.b + grow) * Math.sign(s) * Math.pow(Math.abs(s), e)]);
-    if (i) cum.push(cum[i - 1] + Math.hypot(dense[i][0] - dense[i - 1][0], dense[i][1] - dense[i - 1][1]));
-  }
-  const pts = [], total = cum[D];
+  const P = LAKE_POLY, n = P.length, cum = [0];
+  for (let i = 1; i <= n; i++) cum.push(cum[i - 1] + Math.hypot(P[i % n][0] - P[i - 1][0], P[i % n][1] - P[i - 1][1]));
+  const total = cum[n], pts = [];
   for (let k = 0, j = 0; k < count; k++) {
-    const target = (k / count) * total;
-    while (j < D - 1 && cum[j + 1] < target) j++;
-    const f = (target - cum[j]) / ((cum[j + 1] - cum[j]) || 1);
-    pts.push([dense[j][0] + (dense[j + 1][0] - dense[j][0]) * f, dense[j][1] + (dense[j + 1][1] - dense[j][1]) * f]);
+    const target = (k / count) * total; while (j < n - 1 && cum[j + 1] < target) j++;
+    const f = (target - cum[j]) / ((cum[j + 1] - cum[j]) || 1), a = P[j], b = P[(j + 1) % n];
+    const x = a[0] + (b[0] - a[0]) * f, z = a[1] + (b[1] - a[1]) * f;
+    if (!grow) { pts.push([x, z]); continue; }
+    const e = 0.6, gx = lakeSD(x + e, z) - lakeSD(x - e, z), gz = lakeSD(x, z + e) - lakeSD(x, z - e), l = Math.hypot(gx, gz) || 1;
+    pts.push([x + (gx / l) * grow, z + (gz / l) * grow]);          // pushed outwards along the shore's normal
   }
   return pts;
 }
+LAKE.shore = lakeRing(7, 200).reduce((m, p) => (p[1] > m[1] ? p : m));        // a spot on the south bank, on dry land
+LAKE.shore = { x: LAKE.shore[0], z: LAKE.shore[1] };
 
 // ---- the Lingaraja compound (walled, entrance on the east) ----
 export const COMPOUND = { cx: LINGARAJ.x + 28, cz: LINGARAJ.z, hw: 79, hd: 71 };
@@ -189,9 +208,11 @@ export function buildPlan(osm = null) {
 
   // ------------- benches along the tank promenade, facing the water -------------
   const benchAt = (x, z, yaw) => { plan.benches.push({ x, z, yaw }); plan.interactables.push({ id: 'bench_' + plan.benches.length, type: 'sit', x, z, y: 0, yaw, radius: 1.9, label: 'Sit' }); };
-  for (let x = LAKE.cx - 150; x <= LAKE.cx + 150; x += 50) { if (Math.abs(x - chai.x) < 22) continue; benchAt(x, LAKE.cz + LAKE.b + 4.6, 0); }          // south side, facing north
-  for (let x = LAKE.cx - 150; x <= LAKE.cx + 150; x += 50) benchAt(x, LAKE.cz - LAKE.b - 4.6, Math.PI);                                              // north side, facing south
-  for (const s of [-1, 1]) benchAt(LAKE.cx + s * (LAKE.a + 4.6), LAKE.cz, s > 0 ? Math.PI / 2 : -Math.PI / 2);                                         // ends
+  for (const [x, z] of lakeRing(4.6, 40)) {
+    if (Math.hypot(x - chai.x, z - chai.z) < 22 || nearestRoad(x, z).d < 4) continue;
+    const e = 0.6, gx = lakeSD(x + e, z) - lakeSD(x - e, z), gz = lakeSD(x, z + e) - lakeSD(x, z - e);
+    benchAt(x, z, Math.atan2(gx, gz));                               // facing the water
+  }
   plan.benches.forEach((b) => plan.boxes.push({ x: b.x, z: b.z, hw: 0.9, hd: 0.3, theta: 0, y0: 0, y1: 0.5, bench: true }));
   // (the bench box would block sitting; benches are walk-through for the sit action, so no collider is kept for them)
   plan.boxes = plan.boxes.filter((b) => !b.bench);

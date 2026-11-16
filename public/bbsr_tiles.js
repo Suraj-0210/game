@@ -28,7 +28,7 @@ function streetIndex(roads) {
   };
 }
 
-export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, flyovers = () => [], shadows = true, lite = false, base = '/data/city/' }) {
+export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, flyovers = () => [], shadows = true, lite = false, base = '/data/city/', skipWater = null }) {
   let index = null, T = 500;
   const tiles = new Map(), ready = [];             // key -> { state, group, chunks, cols, data }
   const lm = (c, extra = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.9, metalness: 0, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -0.5, polygonOffsetUnits: -0.5, ...extra });
@@ -177,6 +177,7 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
       const buf = {};
       const push = (k, ax, az, bx, bz, cx, cz) => { const y = LY[k]; (buf[k] || (buf[k] = [])).push(ax, y, az, bx, y, bz, cx, y, cz); };
       for (const L of data.land) {
+        if (!L.line && L.k === 'water' && skipWater && skipWater(L.pts)) continue;           // the old town's tank is drawn by the area itself
         if (L.line) {
           const P = L.pts, hw = L.w / 2; if (P.length < 2) continue;
           const nrm = P.map((p, i) => { const a = P[Math.max(0, i - 1)], b = P[Math.min(P.length - 1, i + 1)], dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz) || 1; return [-dz / l, dx / l]; });

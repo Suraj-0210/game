@@ -95,7 +95,7 @@ export function spotsFromPlan(plan, geom) {
   const av = plan.temples.find((t) => t.id === 'ananta');
   return {
     lingaraja: { x: COMPOUND.cx + COMPOUND.hw + 11, z: COMPOUND.cz, r: 6 },
-    bindusagar: { x: LAKE.cx, z: LAKE.cz + LAKE.b + 8, r: 9 },
+    bindusagar: { x: LAKE.shore ? LAKE.shore.x : LAKE.cx, z: LAKE.shore ? LAKE.shore.z : LAKE.cz + LAKE.b + 8, r: 9 },
     mahakala: { x: MAHAKALA.x, z: MAHAKALA.z + 8, r: 5 },
     ananta: { x: av.x - 9, z: av.z, r: 5 },
   };
