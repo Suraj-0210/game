@@ -80,8 +80,8 @@ def main(path):
                 if elevated:
                     if any(inside(p) for p in simp) and sum(math.hypot(simp[i + 1][0] - simp[i][0], simp[i + 1][1] - simp[i][1]) for i in range(len(simp) - 1)) > 60 and hw in MAIN:
                         fly.append({'name': nm, 'w': ROAD_W[hw], 'pts': simp, 'id': wid})
-                    continue
-                if t.get('tunnel') == 'yes': continue
+                        continue
+                    # a short bridge/underpass is still road: keep it at ground level so the street does not break in two
                 run = []
                 for p in simp + [None]:
                     if p is not None and inside(p, 505): run.append(p)
