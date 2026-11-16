@@ -214,6 +214,85 @@ export function createKit(THREE, mergeGeometries) {
     return { key: 'bus', spec: BUS, body: mergePlain(body), glass: mergePlain(glass), detail: merge(detail), head: merge(head), tail: merge(tail), wheels, wheelGeo: wheelGeo(BUS.r, 0.3), L: BUS.L, W: BUS.W, H: 3.6, wb: BUS.wb };
   }
 
+  // ---------------- Ama Bus (Bhubaneswar's blue AC city bus, formerly Mo Bus; run by CRUT) ----------------
+  const AMA = { L: 12.0, W: 2.55, wb: 5.9, r: 0.5, name: 'Ama Bus', accel: 2.8, vmax: 20, camDist: 14.5 };
+  const GLYPH = { A: ['010', '101', '111', '101', '101'], M: ['101', '111', '111', '101', '101'], B: ['110', '101', '110', '101', '110'], U: ['101', '101', '101', '101', '111'], S: ['011', '100', '010', '001', '110'] };
+  function buildAma() {
+    const halfW = AMA.W / 2, L2 = AMA.L / 2, H = 3.35;
+    const body = [extrude([[-L2, 0.42, 0.1], [-L2, 2.95, 0.22], [-L2 + 0.18, H, 0.18], [L2 - 0.1, H, 0.14], [L2, H - 0.25, 0.1], [L2, 0.42, 0.1]], AMA.W, 0.08)];
+    const glass = [], detail = [], head = [], tail = [];
+    const FZ = -3.4, RZ = 2.5, D1 = [-5.45, -4.35], D2 = [0.55, 1.75];       // axle z, door z-ranges (left side only)
+    // glazing: tall front screen, rear screen, side windows broken by the two doors on the left
+    glass.push(windscreen(halfW - 0.1, -L2 + 0.02, 1.2, -L2 + 0.06, 3.0));
+    glass.push(windscreen(halfW - 0.3, L2 + 0.01, 1.6, L2 + 0.01, 2.9));
+    for (const sd of [-1, 1]) {
+      for (let z0 = -4.25; z0 < 5.5; z0 += 1.12) {
+        if (sd < 0 && ((z0 < D2[1] && z0 + 1.0 > D2[0]) || (z0 < D1[1] && z0 + 1.0 > D1[0]))) continue;
+        glass.push(...sidePanel([[z0, 1.3, 0.05], [z0, 2.78, 0.06], [z0 + 1.0, 2.78, 0.06], [z0 + 1.0, 1.3, 0.05]], halfW + 0.012).filter((_, i) => i === (sd < 0 ? 0 : 1)));
+      }
+    }
+    // doors: glass leaves in dark frames
+    for (const [a, b] of [D1, D2]) {
+      const zc = (a + b) / 2, w = b - a;
+      detail.push(box(0.04, 2.05, w, -(halfW + 0.008), 1.5, zc, 0x16202a));
+      for (const k of [-1, 1]) glass.push(...sidePanel([[zc + k * 0.03 - (k < 0 ? w / 2 - 0.08 : -0.02), 0.95, 0.03], [zc + k * 0.03 - (k < 0 ? w / 2 - 0.08 : -0.02), 2.7, 0.03], [zc + k * 0.03 + (k < 0 ? 0.02 : w / 2 - 0.08), 2.7, 0.03], [zc + k * 0.03 + (k < 0 ? 0.02 : w / 2 - 0.08), 0.95, 0.03]], halfW + 0.03).filter((_, i) => i === 0));
+      detail.push(box(0.06, 0.05, w, -(halfW + 0.02), 0.28, zc, 0x9aa0a6));                 // step edge
+      detail.push(box(0.05, 0.07, w + 0.1, -(halfW + 0.01), 2.78, zc, 0xe8eaed));
+    }
+    // livery: white roof-line band, yellow swoosh stripe, dark skirt, white "AMA BUS" lettering
+    for (const sd of [-1, 1]) {
+      const x = sd * (halfW + 0.006);
+      detail.push(box(0.02, 0.26, AMA.L - 0.5, x, 3.08, 0, 0xf4f6f8));
+      detail.push(box(0.02, 0.07, AMA.L - 0.7, x, 1.2, 0, 0xffc21a));
+      detail.push(box(0.02, 0.05, AMA.L - 0.7, x, 1.1, 0, 0xf4f6f8));
+      detail.push(box(0.03, 0.2, AMA.L - 0.3, sd * (halfW + 0.004), 0.55, 0, 0x0d2347));
+      // lettering along the text direction: right side (+x) runs towards the front (-z), left side towards +z
+      const px = 0.1, dir = sd > 0 ? -1 : 1; let z = sd > 0 ? 4.5 : -4.5 + (sd < 0 ? 0 : 0);
+      if (sd < 0) z = -4.0;                          // left side: clear of the first door
+      let cz = z;
+      for (const ch of 'AMA BUS') {
+        if (ch === ' ') { cz += dir * px * 2; continue; }
+        const g = GLYPH[ch];
+        for (let r = 0; r < 5; r++) for (let c = 0; c < 3; c++) if (g[r][c] === '1') detail.push(box(0.025, px * 0.92, px * 0.92, x, 0.98 - r * px, cz + dir * c * px, 0xffffff));
+        cz += dir * px * 4;
+      }
+    }
+    // front: dark mask, LED destination board, logo bar, wipers, bumper, grille slot, CCTV dome, rear board
+    detail.push(box(AMA.W - 0.06, 0.62, 0.05, 0, 0.82, -L2 - 0.01, 0x0f2a52));
+    detail.push(box(1.9, 0.3, 0.05, 0, 3.12, -L2 - 0.03, 0x050505));
+    detail.push(box(1.6, 0.16, 0.04, 0, 3.12, -L2 - 0.06, 0xffa51f));
+    detail.push(box(0.9, 0.12, 0.03, 0, 0.98, -L2 - 0.04, 0xffffff));
+    detail.push(box(AMA.W - 0.02, 0.22, 0.2, 0, 0.5, -L2 - 0.02, 0x15161a));
+    detail.push(box(AMA.W - 0.02, 0.22, 0.2, 0, 0.5, L2 + 0.02, 0x15161a));
+    detail.push(box(0.9, 0.3, 0.04, 0, 0.74, -L2 - 0.05, 0x080808));
+    detail.push(box(0.56, 0.12, 0.02, 0, 0.5, -L2 - 0.13, 0xf3f3f1)); detail.push(box(0.56, 0.12, 0.02, 0, 0.5, L2 + 0.13, 0xf3f3f1));
+    detail.push(box(1.0, 0.24, 0.04, 0, 3.0, L2 + 0.03, 0x050505)); detail.push(box(0.5, 0.1, 0.03, 0, 3.0, L2 + 0.06, 0xffa51f));
+    detail.push(box(1.4, 0.28, 0.04, 0, 0.9, L2 + 0.03, 0xf4f6f8));
+    detail.push(cyl(0.08, 0.1, 0.08, 8, -0.7, 3.0, -L2 + 0.4, 0, 0, 0x222428));
+    for (const sx of [-0.55, 0.55]) detail.push(box(0.02, 0.02, 0.8, sx, 1.45, -L2 - 0.04, 0x15161a));
+    // side destination boards
+    detail.push(box(0.03, 0.3, 0.9, -(halfW + 0.012), 2.92, -4.9, 0x050505)); detail.push(box(0.035, 0.13, 0.75, -(halfW + 0.02), 2.92, -4.9, 0xffa51f));
+    detail.push(box(0.03, 0.3, 0.9, -(halfW + 0.012), 2.92, 3.7, 0x050505));
+    // roof: white shell, two AC condensers, a vent hatch and a GPS/antenna
+    detail.push(box(AMA.W - 0.25, 0.04, AMA.L - 0.5, 0, H + 0.02, 0, 0xe9ecef));
+    detail.push(box(1.7, 0.34, 2.9, 0, H + 0.2, -2.4, 0xdfe3e7)); detail.push(box(1.7, 0.34, 2.9, 0, H + 0.2, 1.0, 0xdfe3e7));
+    for (let k = 0; k < 4; k++) { detail.push(cyl(0.3, 0.3, 0.03, 10, k % 2 ? 0.45 : -0.45, H + 0.38, -3.0 + (k >> 1) * 0.0 + (k < 2 ? 0 : 3.4), 0, 0, 0x3a3f45)); }
+    detail.push(box(0.6, 0.12, 0.6, 0, H + 0.08, 3.9, 0xcfd3d8)); detail.push(cyl(0.03, 0.03, 0.3, 6, 0.6, H + 0.2, 4.6, 0, 0, 0x1a1a1a));
+    for (const sd of [-1, 1]) {
+      head.push(box(0.4, 0.18, 0.08, sd * (halfW - 0.28), 0.62, -L2 - 0.03));
+      head.push(box(0.2, 0.08, 0.06, sd * (halfW - 0.28), 0.9, -L2 - 0.03));
+      tail.push(box(0.18, 0.6, 0.06, sd * (halfW - 0.15), 1.25, L2 + 0.04));
+      detail.push(box(0.04, 0.5, 0.04, sd * (halfW + 0.3), 2.3, -L2 + 0.35, 0x15161a));
+      detail.push(box(0.1, 0.5, 0.2, sd * (halfW + 0.36), 2.3, -L2 + 0.4, 0x1a1a1a));
+    }
+    const wheels = [];
+    for (const z of [FZ, RZ]) for (const sd of [-1, 1]) {
+      wheels.push({ x: sd * (halfW - 0.14), y: AMA.r, z, r: AMA.r, w: 0.3, front: z < 0, side: sd });
+      detail.push(box(0.04, AMA.r * 1.85, AMA.r * 2.35, sd * (halfW - 0.1), AMA.r + 0.06, z, 0x0a0a0a));
+    }
+    return { key: 'ama', spec: AMA, body: mergePlain(body), glass: mergePlain(glass), detail: merge(detail), head: merge(head), tail: merge(tail), wheels, wheelGeo: wheelGeo(AMA.r, 0.3), L: AMA.L, W: AMA.W, H: 3.9, wb: AMA.wb };
+  }
+
   // ---------------- truck ----------------
   const TRUCK = { L: 8.0, W: 2.4, wb: 4.4, r: 0.5, name: 'Truck', accel: 2.8, vmax: 18, camDist: 11.5 };
   function buildTruck() {
@@ -242,7 +321,7 @@ export function createKit(THREE, mergeGeometries) {
     return { key: 'truck', spec: TRUCK, body: mergePlain(body), glass: mergePlain(glass), detail: merge(detail), head: merge(head), tail: merge(tail), wheels, wheelGeo: wheelGeo(TRUCK.r, 0.3), L: TRUCK.L, W: TRUCK.W, H: 3.2, wb: TRUCK.wb };
   }
 
-  const BUILDERS = { hatch: () => buildCar('hatch'), sedan: () => buildCar('sedan'), suv: () => buildCar('suv'), auto: buildAuto, bus: buildBus, truck: buildTruck, scooter: buildScooter };
+  const BUILDERS = { hatch: () => buildCar('hatch'), sedan: () => buildCar('sedan'), suv: () => buildCar('suv'), auto: buildAuto, bus: buildBus, ama: buildAma, truck: buildTruck, scooter: buildScooter };
   const TYPE_KEYS = Object.keys(BUILDERS);
   const models = {};
   const model = (k) => models[k] || (models[k] = BUILDERS[k]());

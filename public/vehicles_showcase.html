@@ -14,7 +14,7 @@ const gnd = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStan
 const kit = createKit(THREE, mergeGeometries);
 const keys = (q.get('k') || 'hatch,sedan,suv,auto,bus,truck').split(',');
 let x = 0; const gs = [];
-keys.forEach((k, i) => { const g = kit.buildGroup(k, PAINTS[(i * 3 + 3) % PAINTS.length]); g.position.x = x; x += 7 + (k === 'bus' ? 6 : 0); sc.add(g); gs.push(g); });
+keys.forEach((k, i) => { const g = kit.buildGroup(k, k === 'ama' ? 0x1d4fa0 : PAINTS[(i * 3 + 3) % PAINTS.length]); g.position.x = x; x += 7 + (k === 'bus' ? 6 : 0); sc.add(g); gs.push(g); });
 const cam = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 300);
 const view = q.get('v') || 'front3q', tgt = gs[+q.get('i') || 0];
 const p = tgt.position, d = +q.get('d') || 7;

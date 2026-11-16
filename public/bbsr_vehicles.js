@@ -5,13 +5,13 @@ import { laneOffset, signalState } from './bbsr_roads.js';
 
 const TAU = Math.PI * 2;
 const angDiff = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
-export const VEHICLE_NAMES = { hatch: 'hatchback', sedan: 'sedan', suv: 'SUV', auto: 'auto-rickshaw', bus: 'bus', truck: 'truck', scooter: 'scooter' };
-export const TYPE_ID = { hatch: 1, sedan: 2, suv: 3, auto: 4, bus: 5, truck: 6, scooter: 7 };
-export const TYPE_BY_ID = [null, 'hatch', 'sedan', 'suv', 'auto', 'bus', 'truck', 'scooter'];
-const PAINT_OF = { auto: [0x2e8b57, 0xf0c020, 0x2e8b57, 0xe6b800], bus: [0xc23b22, 0x1d5fa8], truck: [0xcf5a1a, 0x2a5da8, 0x4f6b3a, 0x8c2f2f] };
-const TRAFFIC_MIX = [['hatch', 0.2], ['sedan', 0.13], ['suv', 0.08], ['auto', 0.13], ['bus', 0.06], ['truck', 0.08], ['scooter', 0.32]];
+export const VEHICLE_NAMES = { hatch: 'hatchback', sedan: 'sedan', suv: 'SUV', auto: 'auto-rickshaw', bus: 'bus', truck: 'truck', scooter: 'scooter', ama: 'Ama Bus' };
+export const TYPE_ID = { hatch: 1, sedan: 2, suv: 3, auto: 4, bus: 5, truck: 6, scooter: 7, ama: 8 };
+export const TYPE_BY_ID = [null, 'hatch', 'sedan', 'suv', 'auto', 'bus', 'truck', 'scooter', 'ama'];
+const PAINT_OF = { auto: [0x2e8b57, 0xf0c020, 0x2e8b57, 0xe6b800], bus: [0xc23b22, 0x1d5fa8], ama: [0x1d4fa0, 0x1b56b0], truck: [0xcf5a1a, 0x2a5da8, 0x4f6b3a, 0x8c2f2f] };
+const TRAFFIC_MIX = [['hatch', 0.2], ['sedan', 0.13], ['suv', 0.08], ['auto', 0.13], ['bus', 0.03], ['ama', 0.05], ['truck', 0.08], ['scooter', 0.32]];
 const PARKED_MIX = [['hatch', 0.38], ['sedan', 0.26], ['suv', 0.16], ['auto', 0.14], ['truck', 0.06]];
-const CAPACITY = { hatch: 50, sedan: 40, suv: 28, auto: 36, bus: 10, truck: 18, scooter: 40 };
+const CAPACITY = { hatch: 50, sedan: 40, suv: 28, auto: 36, bus: 10, ama: 10, truck: 18, scooter: 40 };
 const CELL = 240;
 
 function mulberry(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
@@ -125,7 +125,7 @@ export function createVehicles({ THREE, kit, scene, roads, blocked, ground, inWo
   }
 
   // ---------------- traffic ----------------
-  const traffic = [], P0 = {}, GAPV = { hatch: 1, sedan: 1, suv: 1, auto: 0.8, bus: 0.85, truck: 0.85, scooter: 1.1 };
+  const traffic = [], P0 = {}, GAPV = { hatch: 1, sedan: 1, suv: 1, auto: 0.8, bus: 0.85, ama: 0.85, truck: 0.85, scooter: 1.1 };
   const target = lite ? 26 : 48;
   function newAgent(px, pz, minD, maxD) {
     const cand = world.roads.filter((r) => r.x1 > px - maxD && r.x0 < px + maxD && r.z1 > pz - maxD && r.z0 < pz + maxD);
@@ -136,18 +136,18 @@ export function createVehicles({ THREE, kit, scene, roads, blocked, ground, inWo
       const s = 6 + rnd() * (r.len - 12), P = pointOn(r, s, 0, P0), dir = r.oneway || rnd() < 0.5 ? 1 : -1;
       const d = Math.hypot(P.x - px, P.z - pz);
       if (d < minD || d > maxD) continue;
-      let type = pickMix(TRAFFIC_MIX, rnd()); if (r.cw < 6.4 && (type === 'bus' || type === 'truck')) type = 'hatch';
+      let type = pickMix(TRAFFIC_MIX, rnd()); if (r.cw < 6.4 && (type === 'bus' || type === 'ama' || type === 'truck')) type = 'hatch';
       const lane = pickLane(r, type), off = laneOffset(r, lane), fx = P.dx * dir, fz = P.dz * dir, x = P.x + fz * off, z = P.z - fx * off;
       if (!inWorld(x, z) || ground(x, z) < -0.4 || blocked(x, z, 1.2, ground(x, z))) continue;
       let clash = false; for (const o of traffic) if (Math.hypot(o.x - x, o.z - z) < 11) { clash = true; break; }
       if (clash || parkedNear(x, z, 4).some((o) => Math.hypot(o.x - x, o.z - z) < 3.5)) continue;
       const hex = paintFor(type, rnd), idx = fleets[type].alloc(hex); if (idx < 0) continue;
-      return { type, idx, r, s, dir, lane, seg: P.i, x, z, y: ground(x, z), yaw: Math.atan2(-fx, -fz), v: 0, vmax: (type === 'bus' ? 8 : type === 'truck' ? 7.5 : type === 'scooter' ? 6 + rnd() * 4.5 : type === 'auto' ? 6.5 + rnd() * 2.5 : 8.5 + rnd() * 5.5) * (r.main ? 1 : 0.75), off, wait: 0, ghost: 0, hex };
+      return { type, idx, r, s, dir, lane, seg: P.i, x, z, y: ground(x, z), yaw: Math.atan2(-fx, -fz), v: 0, vmax: (type === 'bus' || type === 'ama' ? 8 : type === 'truck' ? 7.5 : type === 'scooter' ? 6 + rnd() * 4.5 : type === 'auto' ? 6.5 + rnd() * 2.5 : 8.5 + rnd() * 5.5) * (r.main ? 1 : 0.75), off, wait: 0, ghost: 0, hex };
     }
     return null;
   }
   // slow vehicles keep to the left-most lane, cars use any
-  const pickLane = (r, type) => { const n = Math.max(1, r.lanes | 0), slow = type === 'bus' || type === 'truck' || type === 'auto' || type === 'scooter'; return slow ? (r.oneway ? 0 : n - 1) : Math.floor(rnd() * n); };
+  const pickLane = (r, type) => { const n = Math.max(1, r.lanes | 0), slow = type === 'bus' || type === 'ama' || type === 'truck' || type === 'auto' || type === 'scooter'; return slow ? (r.oneway ? 0 : n - 1) : Math.floor(rnd() * n); };
   const dropAgent = (a) => { fleets[a.type].release(a.idx); const i = traffic.indexOf(a); if (i >= 0) traffic.splice(i, 1); };
   let spawnT = 0, filled = false;
   function stepTraffic(dt, px, pz, cur) {
@@ -198,7 +198,7 @@ export function createVehicles({ THREE, kit, scene, roads, blocked, ground, inWo
         });
         if (opts.length) {
           const e = opts[Math.floor(rnd() * opts.length)]; a.r = e.r; a.dir = e.end ? -1 : 1; a.s = e.end ? e.r.len - 0.1 : 0.1; a.seg = 0; a.lane = pickLane(e.r, a.type);
-          if (e.r.cw < 6.4 && (a.type === 'bus' || a.type === 'truck')) a.v = Math.min(a.v, 3); a.vmax = Math.max(a.vmax, 5.5) * (e.r.main ? 1 : 0.9);
+          if (e.r.cw < 6.4 && (a.type === 'bus' || a.type === 'ama' || a.type === 'truck')) a.v = Math.min(a.v, 3); a.vmax = Math.max(a.vmax, 5.5) * (e.r.main ? 1 : 0.9);
         } else if (r.oneway) { dropAgent(a); continue; }
         else { a.dir = -a.dir; a.s = Math.max(0.1, Math.min(r.len - 0.1, a.s)); a.v *= 0.3; }
       }
@@ -262,7 +262,7 @@ export function createVehicles({ THREE, kit, scene, roads, blocked, ground, inWo
   function engineSound(throttle, soundOn) {
     if (!eng) return;
     const v = Math.abs(cur.v), spec = cur.spec, gears = 5, ratio = Math.min(1, v / spec.vmax), gear = Math.min(gears - 1, Math.floor(ratio * gears)), within = ratio * gears - gear;
-    const rpm = 0.18 + 0.82 * Math.min(1, 0.25 + within * 0.75 + throttle * 0.1), base = (cur.type === 'truck' || cur.type === 'bus' ? 38 : cur.type === 'auto' ? 62 : 52) * (1 + rpm * 2.6);
+    const rpm = 0.18 + 0.82 * Math.min(1, 0.25 + within * 0.75 + throttle * 0.1), base = (cur.type === 'truck' || cur.type === 'bus' || cur.type === 'ama' ? 38 : cur.type === 'auto' ? 62 : 52) * (1 + rpm * 2.6);
     const t = eng.ctx.currentTime;
     eng.o1.frequency.setTargetAtTime(base, t, 0.06); eng.o2.frequency.setTargetAtTime(base * 0.5, t, 0.06);
     eng.f.frequency.setTargetAtTime(260 + rpm * 700 + throttle * 300, t, 0.08);
@@ -271,7 +271,7 @@ export function createVehicles({ THREE, kit, scene, roads, blocked, ground, inWo
   function honk(on, soundOn) {
     if (on && !horn && cur && getAudio) {
       const ctx = getAudio(); if (!ctx || !soundOn) return;
-      try { const a = ctx.createOscillator(), b = ctx.createOscillator(), g = ctx.createGain(); a.type = 'square'; b.type = 'square'; a.frequency.value = cur.type === 'bus' || cur.type === 'truck' ? 280 : 420; b.frequency.value = a.frequency.value * 1.26; g.gain.value = 0.05; a.connect(g); b.connect(g); g.connect(ctx.destination); a.start(); b.start(); horn = { ctx, a, b, g }; } catch (e) { horn = null; }
+      try { const a = ctx.createOscillator(), b = ctx.createOscillator(), g = ctx.createGain(); a.type = 'square'; b.type = 'square'; a.frequency.value = cur.type === 'bus' || cur.type === 'ama' || cur.type === 'truck' ? 280 : 420; b.frequency.value = a.frequency.value * 1.26; g.gain.value = 0.05; a.connect(g); b.connect(g); g.connect(ctx.destination); a.start(); b.start(); horn = { ctx, a, b, g }; } catch (e) { horn = null; }
     } else if (!on && horn) { try { horn.g.gain.setTargetAtTime(0, horn.ctx.currentTime, 0.02); horn.a.stop(horn.ctx.currentTime + 0.1); horn.b.stop(horn.ctx.currentTime + 0.1); } catch (e) { /* ignore */ } horn = null; }
   }
 
