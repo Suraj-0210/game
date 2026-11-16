@@ -260,7 +260,7 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
     frame++;
   }
   // is this point in a river, canal or lake? (walking and driving stop at the water's edge)
-  const inWater = (x, z) => {
+  const inWaterRaw = (x, z) => {
     const t = tiles.get(Math.floor(x / T) + ',' + Math.floor(z / T)); if (!t || t.state !== 'built' || !t.water.length) return false;
     for (const w of t.water) {
       if (x < w.b[0] || x > w.b[2] || z < w.b[1] || z > w.b[3]) continue;
@@ -270,6 +270,19 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
     }
     return false;
   };
+  // a street across a river or tank is a bridge or causeway: you can walk and drive along it
+  const onBridge = (x, z) => {
+    const t = tiles.get(Math.floor(x / T) + ',' + Math.floor(z / T)); if (!t || !t.vr) return false;
+    for (const r of t.vr) {
+      const hw = Math.max(r.w || 6, 5) / 2 + 0.8, P = r.pts;
+      for (let i = 0; i + 1 < P.length; i++) {
+        const dx = P[i + 1][0] - P[i][0], dz = P[i + 1][1] - P[i][1], l2 = dx * dx + dz * dz || 1, u = Math.max(0, Math.min(1, ((x - P[i][0]) * dx + (z - P[i][1]) * dz) / l2));
+        if (Math.hypot(x - P[i][0] - dx * u, z - P[i][1] - dz * u) < hw) return true;
+      }
+    }
+    return false;
+  };
+  const inWater = (x, z) => inWaterRaw(x, z) && !onBridge(x, z);
   const stats = () => { let built = 0, tris = 0; for (const t of tiles.values()) if (t.state === 'built') built++; return { built, known: tiles.size }; };
   const setHooks = (h) => { hooks.add = h.add; hooks.remove = h.remove; if (hooks.add) for (const t of tiles.values()) if (t.state === 'built' && t.vr) hooks.add(t.vr); };
   return { init, update, stats, tiles, mapRoads, setHooks, inWater, get index() { return index; } };
