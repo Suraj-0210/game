@@ -157,6 +157,24 @@ export function createKit(THREE, mergeGeometries) {
     return { key: 'auto', spec: AUTO, body: mergePlain(body), glass: mergePlain(glass), detail: merge(detail), head: merge(head), tail: merge(tail), wheels, wheelGeo: wheelGeo(AUTO.r, 0.15), L: AUTO.L, W: AUTO.W, H: 1.7, wb: AUTO.wb };
   }
 
+  // ---------------- scooter with a rider (the commonest vehicle on the road) ----------------
+  const SCOOT = { L: 1.85, W: 0.68, wb: 1.24, r: 0.2, name: 'Scooter', accel: 3.2, vmax: 16, camDist: 4 };
+  function buildScooter() {
+    const body = [box(0.42, 0.36, 0.72, 0, 0.56, 0.42), box(0.38, 0.07, 0.56, 0, 0.3, -0.08), box(0.36, 0.52, 0.1, 0, 0.6, -0.6), box(0.3, 0.3, 0.1, 0, 0.82, -0.66)];
+    const detail = [], head = [], tail = [], glass = [box(0.3, 0.17, 0.02, 0, 1.12, -0.74)];     // a small wind deflector
+    detail.push(box(0.3, 0.09, 0.6, 0, 0.78, 0.4, 0x1b1b1d));
+    detail.push(box(0.04, 0.42, 0.04, 0, 0.86, -0.66, 0x303236)); detail.push(box(0.66, 0.045, 0.045, 0, 1.06, -0.68, 0x303236));
+    detail.push(box(0.2, 0.14, 0.12, 0, 0.98, -0.72, 0x1b1b1d));
+    detail.push(box(0.1, 0.09, 0.42, 0.19, 0.27, 0.5, 0x6b6e73));
+    detail.push(box(0.08, 0.04, 0.16, 0, 0.5, 0.86, 0xf3f3f1));
+    detail.push(box(0.3, 0.2, 0.46, 0, 0.92, 0.16, 0x2d3748)); detail.push(box(0.28, 0.48, 0.2, 0, 1.28, 0.16, 0x3f6db0));
+    for (const sd of [-1, 1]) detail.push(box(0.08, 0.09, 0.55, sd * 0.2, 1.22, -0.18, 0x3f6db0)); detail.push(box(0.22, 0.24, 0.24, 0, 1.68, 0.12, 0x202225));
+    head.push(cyl(0.07, 0.07, 0.04, 12, 0, 0.98, -0.79, Math.PI / 2, 0));
+    tail.push(box(0.12, 0.05, 0.03, 0, 0.62, 0.86));
+    const wheels = [{ x: 0, y: SCOOT.r, z: -0.62, r: SCOOT.r, w: 0.1, front: true, side: 0 }, { x: 0, y: SCOOT.r, z: 0.62, r: SCOOT.r, w: 0.1, front: false, side: 0 }];
+    return { key: 'scooter', spec: SCOOT, body: mergePlain(body), glass: mergePlain(glass), detail: merge(detail), head: merge(head), tail: merge(tail), wheels, wheelGeo: wheelGeo(SCOOT.r, 0.1), L: SCOOT.L, W: SCOOT.W, H: 1.8, wb: SCOOT.wb };
+  }
+
   // ---------------- city bus ----------------
   const BUS = { L: 10.6, W: 2.5, wb: 5.4, r: 0.52, name: 'City bus', accel: 3.0, vmax: 20, camDist: 12.5 };
   function buildBus() {
@@ -224,7 +242,7 @@ export function createKit(THREE, mergeGeometries) {
     return { key: 'truck', spec: TRUCK, body: mergePlain(body), glass: mergePlain(glass), detail: merge(detail), head: merge(head), tail: merge(tail), wheels, wheelGeo: wheelGeo(TRUCK.r, 0.3), L: TRUCK.L, W: TRUCK.W, H: 3.2, wb: TRUCK.wb };
   }
 
-  const BUILDERS = { hatch: () => buildCar('hatch'), sedan: () => buildCar('sedan'), suv: () => buildCar('suv'), auto: buildAuto, bus: buildBus, truck: buildTruck };
+  const BUILDERS = { hatch: () => buildCar('hatch'), sedan: () => buildCar('sedan'), suv: () => buildCar('suv'), auto: buildAuto, bus: buildBus, truck: buildTruck, scooter: buildScooter };
   const TYPE_KEYS = Object.keys(BUILDERS);
   const models = {};
   const model = (k) => models[k] || (models[k] = BUILDERS[k]());

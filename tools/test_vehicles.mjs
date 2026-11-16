@@ -10,9 +10,9 @@ const kit = createKit(THREE, mergeGeometries);
 for (const k of kit.TYPE_KEYS) {
   const m = kit.model(k);
   assert.ok(m.body && m.detail && m.glass && m.head && m.tail, k + ' has all parts');
-  assert.ok(m.wheels.length >= 3, k + ' wheels');
+  assert.ok(m.wheels.length >= (k === 'scooter' ? 2 : 3), k + ' wheels');
   const tris = [m.body, m.glass, m.detail, m.head, m.tail].reduce((a, g) => a + g.attributes.position.count / 3, 0) + m.wheels.length * m.wheelGeo.attributes.position.count / 3;
-  assert.ok(tris > 400 && tris < 12000, `${k}: ${tris} triangles`);
+  assert.ok(tris > (k === 'scooter' ? 200 : 400) && tris < 12000, `${k}: ${tris} triangles`);
   for (const g of [m.body, m.detail]) { g.computeBoundingBox(); const b = g.boundingBox; assert.ok(b.max.y - b.min.y > 0.5 && Math.abs(b.max.z - b.min.z) < m.L + 0.6, k + ' size'); }
   console.log(k.padEnd(6), Math.round(tris), 'triangles');
 }
