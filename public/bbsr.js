@@ -132,6 +132,7 @@ function addBoxCollider(b) {
 }
 // Is a body (feet at py, 1.8 m tall, horizontal radius pr) touching anything solid at x,z?
 function blocked(x, z, pr, py) {
+  if (cityTiles && (py === undefined || py < 1.2) && cityTiles.inWater(x, z)) return true;     // rivers and lakes are not walkable
   const cx = Math.floor(x / 8), cz = Math.floor(z / 8), top = py + 1.8;
   for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
     const k = CKEY(cx + dx, cz + dz), a = circles.get(k);

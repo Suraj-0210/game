@@ -249,6 +249,17 @@ export function buildRoads(ctx, roads, M, plan) {
       ribbon('foot', P.v, Math.min(a, b), Math.max(a, b), 0.07, 0xffffff, r, { pad: 0.2 }, 5);
       ribbon('plain', P.v, side * (hw + 0.02) - 0.12, side * (hw + 0.02) + 0.12, 0.078, KERB, r, { pad: 0.2 });
       wall('plain', P.v, side * (hw + 0.02), 0.03, 0.078, 0xa9a69d, r, 0.2);
+      // white metal railings along the footpath of the big roads, in stretches (as on Nandankanan Road)
+      if (plan && plan.railings && /^(trunk|primary|secondary)$/.test(r.kind || '') && foot >= 1.5) {
+        const q = side * (hw + 0.45);
+        for (let s = 1, k = 0; s < P.len - 1.5; s += 3, k++) {
+          if ((Math.floor(s / 70) + (r.grp || 0)) % 2) continue;
+          const p = pathAt(P, s + 1.5), x = p.x + p.rx * q, z = p.z + p.rz * q; if (inside(x, z, r, 1.6)) continue;
+          const B = ch.get('plain', x, z), yw = Math.atan2(-p.tz, p.tx);
+          B.box(x, z, 0.93, 3.0, 0.05, 0.05, yw, 0xeeeeea, { us: 2, vs: 2 }); B.box(x, z, 0.5, 3.0, 0.04, 0.04, yw, 0xe2e2de, { us: 2, vs: 2 });
+          B.box(p.x + p.rx * q - p.tx * 1.4, p.z + p.rz * q - p.tz * 1.4, 0.08, 0.06, 0.9, 0.06, 0, 0xdcdcd8, { us: 2, vs: 2 });
+        }
+      }
     }
     if (!big) continue;
     // markings

@@ -6,7 +6,7 @@ import { finishRoad, pairDual, buildRoads } from './bbsr_roads.js';
 import { LAYOUT, HALF_TILE } from './bbsr_city.js';
 
 const PAL = [0xf4f0e6, 0xf4f0e6, 0xf2dfa0, 0xe8c27e, 0xf0b8b0, 0xb8dcc0, 0xa8c8e0, 0xd89070, 0xe9e2d2, 0xf7d3a0];
-const FLOORS = [1, 2, 2, 2, 3, 3, 3, 4], FILLER = [1, 2, 2, 2, 3, 3, 4];
+const FLOORS = [1, 2, 2, 2, 3, 3, 3, 4], FILLER = [1, 2, 2, 2, 3, 3, 4], SHOPF = [2, 3, 3, 4, 4, 5, 6];
 
 // Place a building tile-side: skip anything that would sit on a street
 function streetIndex(roads) {
@@ -49,7 +49,7 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
     const roads = data.roads.map((r) => ({ name: r.name || '', w: r.w, main: !!r.main, pts: r.pts, kind: r.kind, oneway: r.oneway, lanes: r.lanes, round: r.round, ref: r.ref, grp: r.g }));
     roads.forEach(finishRoad);
     pairDual(roads);
-    const stub = { lamps: [], rounds: [], noSignals: true, worldCoords: true };
+    const stub = { lamps: [], rounds: [], noSignals: true, worldCoords: true, railings: true };
     if (roads.length) {
       const RD = buildRoads({ THREE, Batch }, roads, M, stub);
       for (const m of RD.meshes) { group.add(m.mesh); chunks.push(m); }
@@ -72,7 +72,7 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
       const G = 16, occ = new Map(), near = (x, z, r) => { const cx = Math.floor(x / G), cz = Math.floor(z / G); for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) { const l = occ.get((cx + i) + ',' + (cz + j)); if (l) for (const o of l) if (Math.hypot(o[0] - x, o[1] - z) < o[2] + r) return true; } return false; };
       const put = (x, z, r) => { const k = Math.floor(x / G) + ',' + Math.floor(z / G); let l = occ.get(k); if (!l) occ.set(k, (l = [])); l.push([x, z, r]); };
       for (const [x, z, bw, bd] of data.b) put(x, z, Math.hypot(Math.min(bw, 60), Math.min(bd, 60)) * 0.45);
-      const x0 = t.ix * T, z0 = t.iz * T, KIND = { residential: 0.85, living_street: 0.8, unclassified: 0.7, tertiary: 0.6, secondary: 0.3 }, keep = lite ? 0.55 : 1;
+      const x0 = t.ix * T, z0 = t.iz * T, KIND = { residential: 0.85, living_street: 0.8, unclassified: 0.7, tertiary: 0.8, secondary: 0.85, primary: 0.7, trunk: 0.35 }, SHOP = { primary: 1, secondary: 1, tertiary: 1, trunk: 1 }, SIGN = [0xd9402e, 0x2e6fd9, 0xe0b030, 0x2a9d5c, 0xf4f4f0, 0x8a3fb0], SHOPC = [0xf0e4c8, 0xe8c9a0, 0xc9d8e6, 0xf2d2c8, 0xdfe6cf], keep = lite ? 0.55 : 1;
       const inArea = (x, z) => { for (const id in LAYOUT) if (Math.abs(x - LAYOUT[id][0]) < HALF_TILE + 12 && Math.abs(z - LAYOUT[id][1]) < HALF_TILE + 12) return true; return false; };
       let made = 0;
       for (const r of roads) {
@@ -82,15 +82,17 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
         for (let i = 0; i + 1 < r.pts.length && made < 900; i++) {
           const a = r.pts[i], b = r.pts[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L < 1) continue;
           const tx = (b[0] - a[0]) / L, tz = (b[1] - a[1]) / L, yaw = Math.atan2(-tz, tx);
-          for (let s = carry; s < L; s += 14 + rand() * 9) {
+          const shop = !!SHOP[r.kind];
+          for (let s = carry; s < L; s += shop ? 10 + rand() * 6 : 14 + rand() * 9) {
             for (const side of [-1, 1]) {
               if (rand() > pr) continue;
-              const w = 7 + rand() * 7, d = 7 + rand() * 6, off = off0 + d / 2, x = a[0] + tx * s - tz * side * off, z = a[1] + tz * s + tx * side * off, rr = Math.hypot(w, d) / 2;
+              const w = shop ? 8 + rand() * 6 : 7 + rand() * 7, d = 7 + rand() * 6, off = off0 + d / 2, x = a[0] + tx * s - tz * side * off, z = a[1] + tz * s + tx * side * off, rr = Math.hypot(w, d) / 2;
               if (x < x0 || x >= x0 + T || z < z0 || z >= z0 + T || inArea(x, z)) continue;
               if (dist(x, z) < rr * 0.7 || near(x, z, rr * 0.8)) continue;
               put(x, z, rr * 0.8); made++;
-              const floors = FILLER[Math.floor(rand() * FILLER.length)], h = floors * 3.2 + 0.5;
-              fa.box(x, z, 0, w, h, d, yaw, PAL[Math.floor(rand() * PAL.length)], { us: 6, vs: 3.2, top: false });
+              const floors = shop ? SHOPF[Math.floor(rand() * SHOPF.length)] : FILLER[Math.floor(rand() * FILLER.length)], h = floors * 3.2 + 0.5;
+              fa.box(x, z, 0, w, h, d, yaw, shop ? SHOPC[Math.floor(rand() * SHOPC.length)] : PAL[Math.floor(rand() * PAL.length)], { us: 6, vs: 3.2, top: false });
+              if (shop) { const nx = -tz * side, nz = tx * side; roofs.box(x - nx * (d / 2 + 0.14), z - nz * (d / 2 + 0.14), 3.3, w * 0.92, 0.9, 0.25, yaw, SIGN[Math.floor(rand() * SIGN.length)], { us: 2, vs: 2 }); }
               roofs.box(x, z, h, w + 0.3, 0.4, d + 0.3, yaw, 0xcfc8b8, { sides: true });
               cols.push(addBoxCollider({ x, z, hw: w / 2, hd: d / 2, theta: yaw, y0: 0, y1: h + 1 }));
             }
@@ -130,6 +132,11 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
       }
     }
     for (const l of stub.lamps) { fur.box(l.x, l.z, 0, 0.16, 4.8, 0.16, 0, 0x3a3f44, { us: 2, vs: 2 }); heads.box(l.x, l.z, 4.8, 0.55, 0.22, 0.55, 0, 0xffffff, { us: 2, vs: 2 }); }
+    const water = [];
+    for (const L of data.land || []) if (L.k === 'water') {
+      let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9; for (const q of L.pts) { x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); z0 = Math.min(z0, q[1]); z1 = Math.max(z1, q[1]); }
+      const hw = L.line ? L.w * 0.4 : 0; water.push({ line: !!L.line, hw, pts: L.pts, b: [x0 - hw, z0 - hw, x1 + hw, z1 + hw] });
+    }
     // ---- water, green land, the airport (flat on the ground, under the streets) ----
     if (data.land && data.land.length) {
       const buf = {};
@@ -165,7 +172,7 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
     addC(fa, M.facade, shadows); addC(roofs, M.plain, shadows); addC(fur, M.plain, false); addC(heads, M.lamp, false);
     scene.add(group);
     const mr = roads.map((r) => { let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9; for (const p of r.pts) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); z0 = Math.min(z0, p[1]); z1 = Math.max(z1, p[1]); } return { w: r.cw || r.w, pts: r.pts, main: r.main, b: [x0, z0, x1, z1] }; });
-    return { group, chunks, cols, mr, vr: roads.map((r) => ({ pts: r.pts, w: r.w, main: r.main, src: r })) };
+    return { water, group, chunks, cols, mr, vr: roads.map((r) => ({ pts: r.pts, w: r.w, main: r.main, src: r })) };
   }
 
   function drop(t) {
@@ -175,7 +182,7 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
     }
     for (const e of t.cols || []) e.off = true;      // colliders stay in their grid, switched off
     if (hooks.remove && t.vr) hooks.remove(new Set(t.vr.map((q) => q.src)));
-    t.vr = null; t.group = null; t.chunks = []; t.cols = []; t.mr = []; t.state = 'gone'; remap();
+    t.water = []; t.vr = null; t.group = null; t.chunks = []; t.cols = []; t.mr = []; t.state = 'gone'; remap();
   }
 
   // px,pz: the player; reach: how far (m) streets and buildings are drawn
@@ -191,7 +198,7 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
       if (Math.hypot(dx, dz) > reach + 80) continue;
       want.add(key);
       let t = tiles.get(key);
-      if (!t) { t = { key, ix, iz, state: 'new', group: null, chunks: [], cols: [], mr: [], data: null }; tiles.set(key, t); }
+      if (!t) { t = { key, ix, iz, state: 'new', group: null, chunks: [], cols: [], mr: [], water: [], data: null }; tiles.set(key, t); }
       if (t.state === 'new' || t.state === 'gone') {
         if (t.data) { t.state = 'ready'; ready.push(t); }
         else { t.state = 'loading'; fetch(`${base}t_${ix}_${iz}.json`).then((r) => r.json()).then((d) => { t.data = d; t.state = 'ready'; ready.push(t); }).catch(() => { t.state = 'failed'; }); }
@@ -202,7 +209,7 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
       ready.sort((a, b) => Math.hypot((a.ix + 0.5) * T - px, (a.iz + 0.5) * T - pz) - Math.hypot((b.ix + 0.5) * T - px, (b.iz + 0.5) * T - pz));
       const t = ready.shift();
       if (t.state === 'ready' && want.has(t.key)) {
-        const b = build(t, t.data); t.group = b.group; t.chunks = b.chunks; t.cols = b.cols; t.mr = b.mr; t.vr = b.vr; t.state = 'built'; remap(); if (hooks.add) hooks.add(t.vr);
+        const b = build(t, t.data); t.group = b.group; t.chunks = b.chunks; t.cols = b.cols; t.mr = b.mr; t.vr = b.vr; t.water = b.water; t.state = 'built'; remap(); if (hooks.add) hooks.add(t.vr);
         for (const e of t.cols) e.off = false;
       }
     }
@@ -215,7 +222,18 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
     }
     frame++;
   }
+  // is this point in a river, canal or lake? (walking and driving stop at the water's edge)
+  const inWater = (x, z) => {
+    const t = tiles.get(Math.floor(x / T) + ',' + Math.floor(z / T)); if (!t || t.state !== 'built' || !t.water.length) return false;
+    for (const w of t.water) {
+      if (x < w.b[0] || x > w.b[2] || z < w.b[1] || z > w.b[3]) continue;
+      const P = w.pts;
+      if (w.line) { for (let i = 0; i + 1 < P.length; i++) { const dx = P[i + 1][0] - P[i][0], dz = P[i + 1][1] - P[i][1], l2 = dx * dx + dz * dz || 1, u = Math.max(0, Math.min(1, ((x - P[i][0]) * dx + (z - P[i][1]) * dz) / l2)); if (Math.hypot(x - P[i][0] - dx * u, z - P[i][1] - dz * u) < w.hw) return true; } }
+      else { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) if ((P[i][1] > z) !== (P[j][1] > z) && x < ((P[j][0] - P[i][0]) * (z - P[i][1])) / (P[j][1] - P[i][1]) + P[i][0]) c = !c; if (c) return true; }
+    }
+    return false;
+  };
   const stats = () => { let built = 0, tris = 0; for (const t of tiles.values()) if (t.state === 'built') built++; return { built, known: tiles.size }; };
   const setHooks = (h) => { hooks.add = h.add; hooks.remove = h.remove; if (hooks.add) for (const t of tiles.values()) if (t.state === 'built' && t.vr) hooks.add(t.vr); };
-  return { init, update, stats, tiles, mapRoads, setHooks, get index() { return index; } };
+  return { init, update, stats, tiles, mapRoads, setHooks, inWater, get index() { return index; } };
 }
