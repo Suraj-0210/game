@@ -201,6 +201,19 @@ export function buildRoads(ctx, roads, M, plan) {
       else B.quad([pa[0], y0, pa[2]], [pb[0], y0, pb[2]], [pb[0], y1, pb[2]], [pa[0], y1, pa[2]], n, [[0, 0], [1, 0], [1, 1], [0, 1]], cc);
     }
   };
+  // the median of a Bhubaneswar road: a clipped hedge on a kerb painted black and white
+  const hedge = (P, q, wd, self) => {
+    for (let s = 1.5, k = 0; s < P.len - 1.5; s += 3, k++) {
+      const p = pathAt(P, s + 1.5), x = p.x + p.rx * q, z = p.z + p.rz * q; if (inside(x, z, self, 1.4)) continue;
+      ch.get('plain', x, z).box(x, z, 0.2, 3.05, 0.62 + ((k * 7) % 3) * 0.05, wd, Math.atan2(-p.tz, p.tx), k % 2 ? 0x3f6b32 : 0x4c7a38, { us: 2, vs: 2 });
+    }
+  };
+  const kerbStripes = (P, q, self) => {
+    for (let s = 0.6, k = 0; s < P.len - 1; s += 1.1, k++) {
+      const p = pathAt(P, s + 0.55), x = p.x + p.rx * q, z = p.z + p.rz * q; if (inside(x, z, self, 0.9)) continue;
+      ch.get('plain', x, z).flat(x, z, 0.205, 1.1, 0.24, Math.atan2(-p.tz, p.tx), k % 2 ? 0x1c1c1c : 0xf2f2ee, 2);
+    }
+  };
   const WHITE = 0xf0efe8, YELLOW = 0xe9c23a, KERB = 0xc9c6bd;
   const dashes = (P, q, on, off, hex, w, self, y = 0.045) => {
     for (let s = 1.5; s + on < P.len - 1; s += on + off) {
@@ -245,7 +258,8 @@ export function buildRoads(ctx, roads, M, plan) {
       ribbon('plain', P.v, hw, hw + m, 0.2, 0x9b9a93, r, { pad: 0.1 });
       wall('plain', P.v, hw, 0.03, 0.2, 0xb4b2a9, r, 0.1);
       if (m >= 1.4) ribbon('plain', P.v, hw + 0.3, hw + m - 0.1, 0.215, 0x56803c, r, { pad: 0.1 });
-      if (m >= 1.2) for (let s = 3; s < P.len - 2; s += 6) { const p = pathAt(P, s), q = hw + m * 0.55; if (inside(p.x + p.rx * q, p.z + p.rz * q, r, 1.5)) continue; const B = ch.get('plain', p.x, p.z), sz = m >= 2.4 ? 0.9 : 0.6; B.box(p.x + p.rx * q, p.z + p.rz * q, 0.2, sz, 0.5 + ((s * 7) % 3) * 0.1, sz, 0, (s * 3) % 2 ? 0x3f6b32 : 0x4c7a38, { us: 2, vs: 2 }); }
+      if (m >= 1.2) hedge(P, hw + m * 0.5, Math.min(1.1, m * 0.7), r);
+      kerbStripes(P, hw + 0.13, r);
       if (plan && plan.lamps) for (let s = 22; s < P.len - 12; s += 38) { const p = pathAt(P, s), q = hw + m * 0.5; const x = p.x + p.rx * q, z = p.z + p.rz * q; if (!inside(x, z, r, 2.5) && !(plan.rounds || []).some((u) => hyp(x - u.x, z - u.z) < u.R + 6) && (plan.worldCoords || (Math.abs(x) < 438 && Math.abs(z) < 438))) plan.lamps.push({ x, z, med: 1 }); }
     }
     if (r.oneway) {
@@ -257,11 +271,8 @@ export function buildRoads(ctx, roads, M, plan) {
       ribbon('plain', P.v, -m, m, 0.2, 0x9b9a93, r, { pad: 0.1 });
       for (const side of [-1, 1]) wall('plain', P.v, side * m, 0.03, 0.2, 0xb4b2a9, r, 0.1);
       if (r.med >= 1.2) ribbon('plain', P.v, -m + 0.28, m - 0.28, 0.215, 0x56803c, r, { pad: 0.1 });
-      for (let s = 3; s < P.len - 2; s += 5.5) {
-        const p = pathAt(P, s); if (inside(p.x, p.z, r, 1.5)) continue;
-        const B = ch.get('plain', p.x, p.z), sz = r.med >= 1.8 ? 0.9 : 0.55;
-        B.box(p.x, p.z, 0.2, sz, 0.5 + ((s * 7) % 3) * 0.1, sz, 0, (s * 3) % 2 ? 0x3f6b32 : 0x4c7a38, { us: 2, vs: 2 });
-      }
+      if (r.med >= 1.2) hedge(P, 0, Math.min(1.1, r.med * 0.6), r);
+      for (const side of [-1, 1]) kerbStripes(P, side * (m - 0.13), r);
       for (const side of [-1, 1]) {
         solid(P, side * (m + 0.22), WHITE, 0.14, r); solid(P, side * edge, WHITE, 0.14, r);
         for (let k = 1; k < r.lanes; k++) dashes(P, side * (m + k * r.laneW), 3, 6, WHITE, 0.12, r);
