@@ -171,8 +171,16 @@ export function buildRoads(ctx, roads, M, plan) {
   const stopsOf = new Map();   // road -> [{s, mv, sig}] for the markings
   for (const sg of signals) for (const a of sg.arms) { let l = stopsOf.get(a.road); if (!l) stopsOf.set(a.road, (l = [])); l.push(a); }
 
+  const fine = (v, maxLen) => {                     // split long path segments so a junction cuts a median/footpath cleanly instead of by one coarse midpoint test
+    const out = [v[0]];
+    for (let i = 0; i + 1 < v.length; i++) {
+      const a = v[i], b = v[i + 1], n = Math.max(1, Math.ceil(hyp(b.x - a.x, b.z - a.z) / maxLen));
+      for (let k = 1; k <= n; k++) { const t = k / n; out.push(k === n ? b : { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, rx: a.rx + (b.rx - a.rx) * t, rz: a.rz + (b.rz - a.rz) * t, m: a.m + (b.m - a.m) * t, s: a.s + (b.s - a.s) * t }); }
+    }
+    return out;
+  };
   const ribbon = (kind, path, q0, q1, y, hex, self, check, us = 8, sub = 0) => {
-    const v = path;
+    const v = check ? fine(path, 2.5) : path;
     for (let i = 0; i + 1 < v.length; i++) {
       const a = v[i], b = v[i + 1];
       if (check) { const mx = (a.x + b.x) / 2 + (a.rx + b.rx) * 0.5 * (q0 + q1) / 2, mz = (a.z + b.z) / 2 + (a.rz + b.rz) * 0.5 * (q0 + q1) / 2; if (inside(mx, mz, self, check.pad)) continue; }
@@ -182,7 +190,8 @@ export function buildRoads(ctx, roads, M, plan) {
       B.quad(A0, B0, B1, A1, [0, 1, 0], [A0, B0, B1, A1].map((p) => [p[0] / us, p[2] / us]), cc);
     }
   };
-  const wall = (kind, path, q, y0, y1, hex, self, pad) => {   // a vertical strip (the kerb face) along offset q, facing outwards (sign of q)
+  const wall = (kind, path0, q, y0, y1, hex, self, pad) => {   // a vertical strip (the kerb face) along offset q, facing outwards (sign of q)
+    const path = fine(path0, 2.5);
     for (let i = 0; i + 1 < path.length; i++) {
       const a = path[i], b = path[i + 1], mx = (a.x + b.x) / 2 + a.rx * q, mz = (a.z + b.z) / 2 + a.rz * q;
       if (inside(mx, mz, self, pad)) continue;
