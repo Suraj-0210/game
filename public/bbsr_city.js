@@ -1,6 +1,7 @@
 // One connected Bhubaneswar: the Old Town sits at the origin and the other areas around it at (roughly) their real compass
 // directions, joined by connector roads. Each area keeps its own local plan; this file places them in the shared world.
 import { Batch } from './bbsr_mesh.js';
+import { buildRoads } from './bbsr_roads.js';
 
 export const TILE = 1000;                 // every area is a 1 km square
 export const HALF_TILE = 500;
@@ -48,7 +49,7 @@ export function distToArea(id, x, z) {
 export function offsetPlan(plan, ox, oz) {
   if (!ox && !oz) return plan;
   const mv = (o) => { if (o && o.x !== undefined) { o.x += ox; o.z += oz; } };
-  for (const k of ['boxes', 'circles', 'interactables', 'npcs', 'lamps', 'stalls', 'temples', 'landmarks', 'spots', 'walls']) (plan[k] || []).forEach(mv);
+  for (const k of ['boxes', 'circles', 'interactables', 'npcs', 'lamps', 'stalls', 'temples', 'landmarks', 'spots', 'walls', 'signals']) (plan[k] || []).forEach(mv);
   for (const k of ['palms', 'broad', 'pines', 'rocks']) ((plan.trees && plan.trees[k]) || []).forEach(mv);
   mv(plan.spawn); mv(plan.travel); mv(plan.chai);
   for (const f of plan.flyovers || []) { f.x0 += ox; f.x1 += ox; f.z0 += oz; f.z1 += oz; f.piers.forEach(mv); }
@@ -99,18 +100,10 @@ export function computeLinks(parts) {
   return out;
 }
 
-// The connector roads (and a marked centre line) between neighbouring areas.
+// The roads between neighbouring areas: the same lanes, medians, kerbs and markings as every other road.
 export function buildConnectors(THREE, M, links) {
-  const road = new Batch(THREE), marks = new Batch(THREE), group = new THREE.Group();
-  for (const lk of links) {
-    for (let i = 0; i + 1 < lk.pts.length; i++) {
-      const [ax, az] = lk.pts[i], [bx, bz] = lk.pts[i + 1], L = Math.hypot(bx - ax, bz - az), yaw = Math.atan2(-(bz - az), bx - ax);
-      if (L < 0.5) continue;
-      road.flat((ax + bx) / 2, (az + bz) / 2, 0.03, L + 0.4, lk.w, yaw, 0xffffff, 8);
-      road.flat(bx, bz, 0.03, lk.w, lk.w, yaw, 0xffffff, 8);
-      for (let s = 3; s < L - 3; s += 9) marks.flat(ax + ((bx - ax) * s) / L, az + ((bz - az) * s) / L, 0.035, 3.2, 0.2, yaw, 0xeeeeee);
-    }
-  }
-  group.add(road.mesh(M.asphalt, false)); group.add(marks.mesh(M.marks, false));
-  return { group, links };
+  const roads = links.map((l) => ({ name: 'Connector', w: l.w, main: true, pts: l.pts.map((p) => [p[0], p[1]]) }));
+  const group = new THREE.Group(), RD = buildRoads({ THREE, Batch }, roads, M, null);
+  for (const m of RD.meshes) group.add(m.mesh);
+  return { group, links, roads, chunks: RD.meshes };
 }

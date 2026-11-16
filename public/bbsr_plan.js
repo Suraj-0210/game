@@ -4,6 +4,7 @@
 // Everything else (street lines, house blocks, the tank's exact outline, the other shrines) is a hand-drawn APPROXIMATION in this alpha.
 // tools/fetch_osm.mjs downloads the real streets and building outlines from OpenStreetMap and public/data/oldtown_osm.json then replaces the guesses.
 
+import { finishRoad } from './bbsr_roads.js';
 export const WORLD = 1000, HALF = WORLD / 2, EDGE = 488;
 export const ORIGIN = { lat: 20.2400, lon: 85.8343 };   // (0, 0) of the game world
 const M_LAT = 110574, M_LON = 111320 * Math.cos((ORIGIN.lat * Math.PI) / 180);
@@ -82,6 +83,7 @@ export function buildPlan(osm = null) {
   else for (const r of ROADS) plan.roads.push({ ...r });
   const ring = lakeRing(16, 96); ring.push(ring[0]);
   if (!OSM) plan.roads.push({ name: 'Tank Road', w: 8, main: true, pts: ring });
+  plan.roads.forEach(finishRoad);
   const segs = [];
   for (const r of plan.roads) for (let i = 0; i + 1 < r.pts.length; i++) segs.push({ ax: r.pts[i][0], az: r.pts[i][1], bx: r.pts[i + 1][0], bz: r.pts[i + 1][1], hw: r.w / 2, main: !!r.main });
   function nearestRoad(x, z) {

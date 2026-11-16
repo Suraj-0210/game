@@ -3,6 +3,7 @@
 // the real places and their rough character are right, the exact geometry is not surveyed.
 import { WORLD, EDGE } from './bbsr_plan.js';
 import { edgeExits } from './bbsr_city.js';
+import { finishRoad, pairDual } from './bbsr_roads.js';
 
 export const ZONES = [
   { id: 'oldtown', room: 'bbsr', name: 'Old Town · Ekamra Kshetra', short: 'Old Town', icon: '\u{1F6D5}', km: 0, blurb: 'Lingaraja Temple, Bindusagar tank, Tala Bazaar' },
@@ -88,7 +89,7 @@ export function buildZonePlan(id, real = null) {
   let segs = [];
   const reindex = () => {
     segs = [];
-    for (const r of plan.roads) for (let i = 0; i + 1 < r.pts.length; i++) segs.push({ ax: r.pts[i][0], az: r.pts[i][1], bx: r.pts[i + 1][0], bz: r.pts[i + 1][1], hw: r.w / 2, main: !!r.main });
+    for (const r of plan.roads) for (let i = 0; i + 1 < r.pts.length; i++) segs.push({ ax: r.pts[i][0], az: r.pts[i][1], bx: r.pts[i + 1][0], bz: r.pts[i + 1][1], hw: r.w / 2 + (r.medHalf || 0), main: !!r.main });
   };
   let segsFor = -1;
   const nearestRoad = (x, z) => {
@@ -104,7 +105,7 @@ export function buildZonePlan(id, real = null) {
   plan.nearestRoad = nearestRoad;
   const H = {
     rand,
-    road(name, w, main, pts) { plan.roads.push({ name, w, main, pts }); },
+    road(name, w, main, pts, extra) { plan.roads.push(finishRoad({ name, w, main, pts, ...(extra || {}), round: (extra && extra.round) || /ring$/i.test(name) })); },
     ring(cx, cz, R, n = 40) { const p = []; for (let i = 0; i <= n; i++) { const a = (i / n) * Math.PI * 2; p.push([cx + Math.cos(a) * R, cz + Math.sin(a) * R]); } return p; },
     clear(x0, z0, x1, z1) { ex.push({ x0, z0, x1, z1 }); },
     roundabout(cx, cz, R, name = 'Square') {
@@ -196,8 +197,8 @@ export function buildZonePlan(id, real = null) {
         for (let i = 0; i + 1 < r.pts.length; i++) {
           const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], L = Math.hypot(bx - ax, bz - az), tx = (bx - ax) / L, tz = (bz - az) / L;
           for (let s = (spacing - acc) % spacing; s < L; s += spacing) {
-            const side = Math.round(s / spacing) % 2 ? 1 : -1, off = r.w / 2 + 1.2, x = ax + tx * s - tz * off * side, z = az + tz * s + tx * off * side;
-            if (Math.abs(x) > 478 || Math.abs(z) > 478 || /ring$/.test(r.name)) continue;
+            const side = Math.round(s / spacing) % 2 ? 1 : -1, off = r.cw ? r.cw / 2 + (r.foot || 0) * 0.55 + 0.35 : r.w / 2 + 1.2, x = ax + tx * s - tz * off * side, z = az + tz * s + tx * off * side;
+            if (Math.abs(x) > 438 || Math.abs(z) > 438 || /ring$/.test(r.name)) continue;
             if ((Math.abs(x) < 24 && Math.abs(z) > 400) || (Math.abs(z) < 24 && Math.abs(x) > 400)) continue;   // keep the connector road corridors clear
             if (plan.rounds.some((q) => Math.hypot(x - q.x, z - q.z) < q.R + 6)) continue;
             if (plan.boxes.some((b) => Math.abs(b.x - x) < b.hw + 1 && Math.abs(b.z - z) < b.hd + 1 && Math.abs(b.theta) < 0.01 && b.y1 > 3)) continue;
@@ -513,7 +514,9 @@ function realBuild(plan, H, id, real) {
   const R = REAL[id], rand = H.rand, nearestRoad = plan.nearestRoad;
   const dist = (a, b, c, d) => Math.hypot(a - c, b - d);
   // ---- streets ----
-  for (const r of real.roads) H.road(r.name || 'road', r.w, !!r.main, r.pts);
+  plan.realSignals = real.signals || [];
+  for (const r of real.roads) H.road(r.name || 'road', r.w, !!r.main, r.pts, { kind: r.kind, oneway: r.oneway, lanes: r.lanes, round: r.round, ref: r.ref });
+  pairDual(plan.roads);
   H.reindex();
   // the connector roads of the city arrive at the middle of each edge: join them to the nearest real street
   const nearestPoint = (x, z) => {

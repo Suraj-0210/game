@@ -73,6 +73,29 @@ export class Batch {
     for (let r = 0; r < R - 1; r++) for (let k = 0; k < M; k++) { tri(id(r, k), id(r, k + 1), id(r + 1, k + 1)); tri(id(r, k), id(r + 1, k + 1), id(r + 1, k)); }
     for (let r = 0; r < R; r++) for (let k = 0; k <= M; k++) { const o = (r * M + (k % M)) * 3, l = Math.hypot(nacc[o], nacc[o + 1], nacc[o + 2]) || 1, vi = (id(r, k)) * 3; this.n[vi] = nacc[o] / l; this.n[vi + 1] = nacc[o + 1] / l; this.n[vi + 2] = nacc[o + 2] / l; }
   }
+  // the same geometry split into square chunks (by triangle centre), so far-away chunks can be skipped and the camera frustum can cull them
+  chunks(material, shadows = true, size = 150) {
+    if (!this.v) return [];
+    const T = this.T, cells = new Map(), I = this.i, P = this.p;
+    for (let k = 0; k < I.length; k += 3) {
+      const a = I[k], b = I[k + 1], c = I[k + 2], cx = (P[a * 3] + P[b * 3] + P[c * 3]) / 3, cz = (P[a * 3 + 2] + P[b * 3 + 2] + P[c * 3 + 2]) / 3, key = Math.floor(cx / size) + ',' + Math.floor(cz / size);
+      let e = cells.get(key); if (!e) cells.set(key, (e = { x: (Math.floor(cx / size) + 0.5) * size, z: (Math.floor(cz / size) + 0.5) * size, t: [] }));
+      e.t.push(a, b, c);
+    }
+    const out = [];
+    for (const e of cells.values()) {
+      const map = new Map(), p = [], n = [], uv = [], col = [], idx = [];
+      for (const v of e.t) {
+        let m = map.get(v); if (m === undefined) { m = p.length / 3; map.set(v, m); p.push(this.p[v * 3], this.p[v * 3 + 1], this.p[v * 3 + 2]); n.push(this.n[v * 3], this.n[v * 3 + 1], this.n[v * 3 + 2]); uv.push(this.uv[v * 2], this.uv[v * 2 + 1]); col.push(this.c[v * 3], this.c[v * 3 + 1], this.c[v * 3 + 2]); }
+        idx.push(m);
+      }
+      const g = new T.BufferGeometry();
+      g.setAttribute('position', new T.Float32BufferAttribute(p, 3)); g.setAttribute('normal', new T.Float32BufferAttribute(n, 3)); g.setAttribute('uv', new T.Float32BufferAttribute(uv, 2)); g.setAttribute('color', new T.Float32BufferAttribute(col, 3));
+      g.setIndex(p.length / 3 > 65535 ? new T.Uint32BufferAttribute(idx, 1) : new T.Uint16BufferAttribute(idx, 1));
+      const m = new T.Mesh(g, material); m.castShadow = shadows; m.receiveShadow = true; out.push({ mesh: m, x: e.x, z: e.z });
+    }
+    return out;
+  }
   mesh(material, shadows = true) {
     if (!this.v) return null;
     const T = this.T, g = new T.BufferGeometry();
@@ -165,6 +188,7 @@ function offsetRing(ring, d) {
   });
 }
 
+import { buildRoads } from './bbsr_roads.js';
 export function buildCity({ THREE, mergeGeometries }, plan, tex, opts = {}) {
   const shadows = opts.shadows !== false, group = new THREE.Group();
   const std = (extra) => new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0, envMapIntensity: 0.5, ...extra });
@@ -182,6 +206,7 @@ export function buildCity({ THREE, mergeGeometries }, plan, tex, opts = {}) {
   };
   M.stone.emissive.setHex(0xff8f3c); M.stone.emissiveMap = M.stone.map; M.stone.emissiveIntensity = 0;   // temples glow warmly at night, carving still visible
   const add = (mesh) => { if (mesh) group.add(mesh); return mesh; };
+  const addC = (batch, mat, sh) => { for (const c of batch.chunks(mat, sh)) { group.add(c.mesh); (group.userData.chunks || (group.userData.chunks = [])).push(c); } };
 
   // ----- ground -----
   {
@@ -191,22 +216,17 @@ export function buildCity({ THREE, mergeGeometries }, plan, tex, opts = {}) {
   }
 
   // ----- roads, centre lines, courtyard paving -----
-  const road = new Batch(THREE), marks = new Batch(THREE), pave = new Batch(THREE);
-  for (const r of plan.roads) {
-    for (let i = 0; i + 1 < r.pts.length; i++) {
-      const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], L = Math.hypot(bx - ax, bz - az), yaw = Math.atan2(-(bz - az), bx - ax);
-      road.flat((ax + bx) / 2, (az + bz) / 2, 0.03, L + 0.4, r.w, yaw, 0xffffff, 8);
-      road.flat(bx, bz, 0.03, r.w, r.w, yaw, 0xffffff, 8);   // fills the corner at each joint
-      if (r.main) for (let s = 2; s < L - 2; s += 7) marks.flat(ax + ((bx - ax) * s) / L, az + ((bz - az) * s) / L, 0.035, 2.6, 0.18, yaw, 0xeeeeee);
-    }
-  }
+  const pave = new Batch(THREE);
+  const RD = buildRoads({ THREE, Batch }, plan.roads, M, plan);   // lanes, medians, kerbs, markings, signals: in spatial chunks
+  for (const m of RD.meshes) group.add(m.mesh);
+  group.userData.chunks = [...(group.userData.chunks || []), ...RD.meshes]; group.userData.signalUpdate = RD.update;
   for (const p of plan.pave) pave.flat((p.x0 + p.x1) / 2, (p.z0 + p.z1) / 2, 0.05, p.x1 - p.x0, p.z1 - p.z0, 0, 0xffffff, 6);
   // the walkway around the tank
   if (plan.lake) {
     const inner = lakeRing(1.9, 260), outer = offsetRing(inner, 6.6);
     for (let i = 0; i < inner.length; i++) { const j = (i + 1) % inner.length; pave.flatQuad(inner[i], inner[j], outer[j], outer[i], 0.06, 0xffffff, 6); }
   }
-  add(road.mesh(M.asphalt, false)); add(marks.mesh(M.marks, false)); add(pave.mesh(M.paving, false));
+  add(pave.mesh(M.paving, false));
 
   // ----- Bindusagar: embankment, water -----
   if (plan.lake) {
@@ -215,7 +235,7 @@ export function buildCity({ THREE, mergeGeometries }, plan, tex, opts = {}) {
       const a = ring[i], b = ring[(i + 1) % ring.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]), yaw = Math.atan2(-(b[1] - a[1]), b[0] - a[0]);
       lat.box((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, 0, L + 0.25, 0.95, 1.5, yaw, 0xffffff);
     }
-    add(lat.mesh(M.laterite, shadows));
+    addC(lat, M.laterite, shadows);
     const shape = new THREE.Shape(), pts = lakeRing(0.4, 300);
     pts.forEach(([x, z], i) => (i ? shape.lineTo(x, -z) : shape.moveTo(x, -z)));
     const wg = new THREE.ShapeGeometry(shape).rotateX(-Math.PI / 2), wuv = wg.attributes.uv;
@@ -251,7 +271,7 @@ export function buildCity({ THREE, mergeGeometries }, plan, tex, opts = {}) {
       rekha(stone, gold, t.x, t.z, t.w, t.h, t.yaw, { levels: 16, sides: 28, stone: 0xfaf0dc });
     }
   }
-  add(lat2.mesh(M.laterite, shadows)); add(stone.mesh(M.stone, shadows)); add(gold.mesh(M.gold, false));
+  addC(lat2, M.laterite, shadows); addC(stone, M.stone, shadows); addC(gold, M.gold, false);
 
   // ----- houses -----
   {
@@ -269,7 +289,7 @@ export function buildCity({ THREE, mergeGeometries }, plan, tex, opts = {}) {
       const off = a.d / 2 + 0.95;
       roofs.box(a.x + a.fx * off, a.z + a.fz * off, 2.7, Math.min(a.w * 0.85, 7), 0.12, 2.0, a.yaw, a.color, { us: 2, vs: 2 });
     }
-    add(fa.mesh(M.facade, shadows)); add(roofs.mesh(M.plain, shadows));
+    addC(fa, M.facade, shadows); addC(roofs, M.plain, shadows);
   }
 
   // ----- street furniture: lamps, benches, stalls, autos, the chai adda -----
@@ -312,7 +332,7 @@ export function buildCity({ THREE, mergeGeometries }, plan, tex, opts = {}) {
     signs.push({ x: tv.x, z: tv.z - 2.1, y: 3.55, yaw: 0, text: 'AUTO STAND', color: '#1f6b3a', w: 3.2, flip: false });
     signs.push({ x: tv.x, z: tv.z - 2.3, y: 3.55, yaw: Math.PI, text: 'AUTO STAND', color: '#1f6b3a', w: 3.2, flip: false });
   }
-  add(fur.mesh(M.plain, shadows)); add(lampHeads.mesh(M.lamp, false));
+  addC(fur, M.plain, shadows); addC(lampHeads, M.lamp, false);
   const signGeo = new THREE.PlaneGeometry(2.6, 0.8);
   for (const s of signs) {
     const tx = signTexture(s.text.toUpperCase(), s.color, '#ffffff'), m = new THREE.Mesh(s.w ? new THREE.PlaneGeometry(s.w, s.w * 0.31) : signGeo, new THREE.MeshStandardMaterial({ map: tx, side: THREE.DoubleSide, roughness: 0.8 }));

@@ -27,7 +27,7 @@ export function createKit(THREE, mergeGeometries) {
     return s;
   };
   const extrude = (pts, width, bevel = 0.07) => {
-    const g = prep(new ExtrudeGeometry(profile(pts), { depth: Math.max(0.01, width - bevel * 2), bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 3, curveSegments: 10 }));
+    const g = prep(new ExtrudeGeometry(profile(pts), { depth: Math.max(0.01, width - bevel * 2), bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 1, curveSegments: 4 }));
     g.translate(0, 0, -(width - bevel * 2) / 2);       // centre on the width axis
     g.rotateY(-Math.PI / 2);                            // profile x -> car z, extrusion -> car x
     return g;
@@ -54,11 +54,10 @@ export function createKit(THREE, mergeGeometries) {
     return quad([-halfW, y0 + ny, z0 + nz], [halfW, y0 + ny, z0 + nz], [halfW, y1 + ny, z1 + nz], [-halfW, y1 + ny, z1 + nz]);
   };
   const wheelGeo = (r, w, tyre = 0x151515, rim = 0xc9ced3, hub = 0x8b9096) => {
-    const parts = [cyl(r, r, w, 22, 0, 0, 0, 0, Math.PI / 2, tyre)];
-    parts.push(cyl(r * 0.7, r * 0.7, w + 0.012, 18, 0, 0, 0, 0, Math.PI / 2, rim));
-    parts.push(cyl(r * 0.22, r * 0.22, w + 0.03, 10, 0, 0, 0, 0, Math.PI / 2, hub));
-    for (let k = 0; k < 5; k++) { const a = (k / 5) * Math.PI * 2; const b = box(w + 0.02, r * 0.1, r * 0.62, 0, 0, 0, 0x6e7378); b.rotateX(a); b.translate(0, Math.sin(a) * 0 , 0); parts.push(b); }
-    parts.push(cyl(r * 0.96, r * 0.96, w + 0.002, 22, 0, 0, 0, 0, Math.PI / 2, 0x0d0d0d));
+    const parts = [cyl(r, r, w, 14, 0, 0, 0, 0, Math.PI / 2, tyre)];
+    parts.push(cyl(r * 0.7, r * 0.7, w + 0.012, 12, 0, 0, 0, 0, Math.PI / 2, rim));
+    parts.push(cyl(r * 0.22, r * 0.22, w + 0.03, 6, 0, 0, 0, 0, Math.PI / 2, hub));
+    for (let k = 0; k < 3; k++) { const a = (k / 3) * Math.PI; const b = box(w + 0.02, r * 0.12, r * 1.2, 0, 0, 0, 0x6e7378); b.rotateX(a); parts.push(b); }
     return mergeGeometries(parts.map((p) => (p.attributes.color ? p : paint(p, 0x888888))));
   };
   const merge = (list) => (list.length ? mergeGeometries(list.map((g) => (g.attributes.color ? g : paint(g, 0x111111)))) : null);
@@ -277,6 +276,10 @@ export function createKit(THREE, mergeGeometries) {
       alloc(hex) { const i = free.pop(); if (i === undefined) return -1; for (const im of list) if (im.count < i + 1) im.count = i + 1; meshes.body.setColorAt(i, col.setHex(hex)); meshes.body.instanceColor.needsUpdate = true; return i; },
       release(i) { if (i < 0) return; for (const im of list) im.setMatrixAt(i, zero); free.push(i); this.dirty = true; },
       set(i, x, y, z, yaw, pitch = 0, roll = 0) { if (i < 0) return; E.set(pitch, yaw, roll); Q.setFromEuler(E); P.set(x, y, z); M.compose(P, Q, S); for (const im of list) im.setMatrixAt(i, M); this.dirty = true; },
+      get free() { return free.length; },
+      // limit this fleet to a patch of the city so the camera and the distance check can skip it
+      bounds(cx, cz, r) { this.cx = cx; this.cz = cz; for (const im of list) { im.frustumCulled = true; im.boundingSphere = new THREE.Sphere(new THREE.Vector3(cx, 0, cz), r); } },
+      show(v) { for (const im of list) im.visible = v; },
       flush() { if (!this.dirty) return; for (const im of list) im.instanceMatrix.needsUpdate = true; this.dirty = false; },
     };
   }

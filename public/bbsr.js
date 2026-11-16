@@ -35,7 +35,7 @@ const ZONE = zoneId(new URLSearchParams(location.search).get('zone'));
 document.title = CITY ? 'Bhubaneswar' : ZONE_BY_ID[ZONE].name + ' · Bhubaneswar';
 const inWorld = (x, z) => (CITY ? inBounds(x, z) : Math.abs(x) < EDGE && Math.abs(z) < EDGE);
 
-const FOG_COLOR = 0xdde8f1, FOG_NEAR = 70, FOG_FAR = 900;
+const FOG_COLOR = 0xdde8f1, FOG_NEAR = 70, FOG_FAR = LITE ? 620 : 900;   // phones draw less far
 const UNDER_COLOR = 0x0a4f73;
 
 // ======================= renderer / scene =======================
@@ -360,10 +360,11 @@ const driving = () => !!(veh && veh.cur);
 function buildVehicles() {
   const kit = createKit(THREE, mergeGeometries);
   const roads = CITY
-    ? [...parts.flatMap((pt) => pt.plan.roads.map((r) => ({ pts: r.pts.map((q) => [q[0] + pt.ox, q[1] + pt.oz]), w: r.w, main: r.main }))), ...cityLinks.map((l) => ({ pts: l.pts, w: l.w, main: true }))]
-    : plan.roads.map((r) => ({ pts: r.pts, w: r.w, main: r.main }));
+    ? [...parts.flatMap((pt) => pt.plan.roads.map((r) => ({ pts: r.pts.map((q) => [q[0] + pt.ox, q[1] + pt.oz]), w: r.w, main: r.main, src: r }))), ...cityRoads.map((r) => ({ pts: r.pts, w: r.w, main: true, src: r }))]
+    : plan.roads.map((r) => ({ pts: r.pts, w: r.w, main: r.main, src: r }));
   veh = createVehicles({ THREE, kit, scene, roads, blocked, ground, inWorld, spawn: plan.spawn, lite: LITE, getAudio: () => { audio.start(); return audio.getContext(); } });
   veh.seedParked(LITE ? 90 : 150);
+  veh.setSignals(CITY ? parts.flatMap((pt) => pt.plan.signals || []) : plan.signals || []);
   speedoEl = document.createElement('div');
   speedoEl.style.cssText = 'position:fixed;left:50%;top:128px;transform:translateX(-50%);display:none;padding:8px 18px;border-radius:12px;background:rgba(10,14,20,.62);color:#fff;font:600 15px system-ui,sans-serif;letter-spacing:.3px;z-index:6;pointer-events:none;text-align:center';
   document.body.appendChild(speedoEl);
@@ -988,9 +989,22 @@ function frame(now) {
     if (!isTouch || frameNo % 2 === 0) hud.drawMinimap(player, [...others.values()].filter((o) => o.seen).map((o) => ({ x: o.group.position.x, z: o.group.position.z })), objNow);
   }
   for (const tw of towns) tw.update(t, waveHeight);
+  if (!CITY && ready && frameNo % 12 === 4 && town) {
+    const g = town.group, reach = Math.min(wxFogFar, FOG_FAR) + 160;
+    if (g.userData.signalUpdate) g.userData.signalUpdate(Date.now() / 1000);
+    if (g.userData.chunks) for (const c of g.userData.chunks) if (!c.always) c.mesh.visible = Math.hypot(c.x - player.x, c.z - player.z) < reach;
+  }
   if (CITY && ready && frameNo % 12 === 4) {
     const px = player.x, pz = player.z;
     for (const pt of parts) pt.town.group.visible = distToArea(pt.id, px, pz) < FOG_FAR + 120;   // only draw the areas you can see
+    // streaming: inside the areas you can see, only the road chunks near you are drawn; the signals tick in step with the wall clock
+    const reach = Math.min(wxFogFar, FOG_FAR) + 60, tsec = Date.now() / 1000;
+    for (const pt of parts) {
+      const g = pt.town.group; if (!g.visible) continue;
+      if (g.userData.signalUpdate && distToArea(pt.id, px, pz) < 260) g.userData.signalUpdate(tsec);
+      if (g.userData.chunks) for (const c of g.userData.chunks) if (!c.always) c.mesh.visible = Math.hypot(c.x + pt.ox - px, c.z + pt.oz - pz) < reach + 100;
+    }
+    for (const c of connChunks) c.mesh.visible = Math.hypot(c.x - px, c.z - pz) < reach + 100;
     const a = areaAt(px, pz);
     if (a && a !== lastArea) { if (lastArea !== null || !welcomed) hud.toast(ZONE_BY_ID[a].name, 2600); lastArea = a; welcomed = true; }
     else if (!a) lastArea = null;
@@ -1036,9 +1050,9 @@ async function buildCityWorld(osm) {
     height: hz.length ? (x, z) => { for (const pt of hz) if (Math.abs(x - pt.ox) <= 500 && Math.abs(z - pt.oz) <= 500) return pt.plan.height(x - pt.ox, z - pt.oz); return 0; } : null,
   };
   town = towns[0];
-  cityLinks = conn.links;
+  cityLinks = conn.links; cityRoads = conn.roads; connChunks = conn.chunks;
 }
-let cityLinks = [];
+let cityLinks = [], cityRoads = [], connChunks = [];
 async function boot() {
   statusEl.textContent = 'Surveying Old Town...'; await nextFrame();
   let osm = null;   // real OpenStreetMap streets and buildings, if tools/fetch_osm.mjs has been run

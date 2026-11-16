@@ -47,6 +47,7 @@ def main(path):
                 la, lo = float(el.get('lat')), float(el.get('lon')); nid = int(el.get('id')); nodes[nid] = (la, lo)
                 t = {c.get('k'): c.get('v') for c in el.findall('tag')}
                 if t.get('name') or t.get('name:en'): ways.append(('node', nid, t, None))
+                elif t.get('highway') == 'traffic_signals': ways.append(('signal', nid, t, None))
                 el.clear()
             elif el.tag == 'way':
                 t = {c.get('k'): c.get('v') for c in el.findall('tag')}
@@ -54,11 +55,15 @@ def main(path):
             elif el.tag == 'relation': el.clear()
     print('read', len(nodes), 'nodes', sum(1 for w in ways if w[0] == 'way'), 'ways')
     for name, (cx, cz) in CENTRES.items():
-        roads, fly, builds, feats = [], [], [], []
+        roads, fly, builds, feats, sigs = [], [], [], [], []
         loc = lambda la, lo: tuple(round(v, 1) for v in (xz(la, lo)[0] - cx, xz(la, lo)[1] - cz))
         inside = lambda p, m=HALF: abs(p[0]) <= m and abs(p[1]) <= m
         for kind, wid, t, refs in ways:
             nm = t.get('name') or t.get('name:en') or ''
+            if kind == 'signal':
+                p = loc(*nodes[wid])
+                if inside(p, 500): sigs.append({'x': p[0], 'z': p[1]})
+                continue
             if kind == 'node':
                 la, lo = nodes[wid]; p = loc(la, lo)
                 cls = next((k + '=' + t[k] for k in FEAT_KEYS if k in t and t[k] not in SKIP), None)
@@ -81,7 +86,17 @@ def main(path):
                 for p in simp + [None]:
                     if p is not None and inside(p, 505): run.append(p)
                     else:
-                        if len(run) >= 2: roads.append({'name': nm, 'kind': hw, 'w': ROAD_W[hw], 'main': hw in MAIN, 'pts': run})
+                        if len(run) >= 2:
+                            rd = {'name': nm, 'kind': hw, 'w': ROAD_W[hw], 'main': hw in MAIN, 'pts': run}
+                            ow = t.get('oneway')
+                            if ow in ('yes', '1', 'true'): rd['oneway'] = 1
+                            elif ow == '-1': rd['oneway'] = 1; rd['pts'] = run[::-1]
+                            if t.get('junction') == 'roundabout': rd['oneway'] = 1; rd['round'] = 1
+                            try: ln = int(t.get('lanes', 0))
+                            except ValueError: ln = 0
+                            if ln: rd['lanes'] = ln
+                            if t.get('ref'): rd['ref'] = t['ref'][:12]
+                            roads.append(rd)
                         run = []
             elif 'building' in t and len(pts) >= 4:
                 poly = pts[:-1] if pts[0] == pts[-1] else pts
@@ -121,10 +136,10 @@ def main(path):
             L = sum(math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]) for i in range(len(pts) - 1))
             if L >= 90: decks.append({'name': ch['name'], 'w': min(ch['w'], 10), 'len': round(L), 'pts': [[round(a, 1), round(b, 1)] for a, b in pts]})
         feats.sort(key=lambda f: f['name'])
-        out = {'area': name, 'center': {'x': cx, 'z': cz}, 'roads': roads, 'flyovers': decks, 'buildings': builds, 'features': feats}
+        out = {'area': name, 'center': {'x': cx, 'z': cz}, 'roads': roads, 'signals': sigs, 'flyovers': decks, 'buildings': builds, 'features': feats}
         fn = os.path.join(os.path.dirname(__file__), '..', 'public', 'data', f'real_{name}.json')
         json.dump(out, open(fn, 'w'), separators=(',', ':'))
-        print(f'{name:11s} roads {len(roads):4d} flyover decks {len(decks)} buildings {len(builds):4d} features {len(feats):3d}  {os.path.getsize(fn) // 1024} KB')
+        print(f'{name:11s} signals {len(sigs):3d} oneway {sum(1 for r in roads if r.get("oneway")):3d} lanes-tagged {sum(1 for r in roads if r.get("lanes")):3d} roads {len(roads):4d} flyover decks {len(decks)} buildings {len(builds):4d} features {len(feats):3d}  {os.path.getsize(fn) // 1024} KB')
 
 if __name__ == '__main__':
     main(sys.argv[1])

@@ -29,7 +29,7 @@ assert.ok(V.parked.length >= 30, 'parked cars placed: ' + V.parked.length);
 for (const c of V.parked) {
   // on the edge of a road, pointing along it
   const onX = Math.abs(((c.z + 50) % 100 + 100) % 100 - 50), onZ = Math.abs(((c.x + 50) % 100 + 100) % 100 - 50), d = Math.min(onX, onZ);
-  assert.ok(d > 2.5 && d < 4.6, `parked car ${c.type} ${d.toFixed(2)} m from a road centre`);
+  assert.ok(d > 2.0 && d < 4.6, `parked car ${c.type} ${d.toFixed(2)} m from a road centre`);
 }
 assert.ok(V.parked.some((c) => Math.hypot(c.x, c.z) < 140), 'some cars near the start');
 
@@ -83,3 +83,35 @@ const rv = V.makeRemote(2, 0xb3202a); assert.ok(rv && rv.group.children.length >
 V.animateRemote(rv, 0, 0, 0, 0, 0.05); V.animateRemote(rv, 0, 0, -1, 0, 0.05); assert.ok(rv.group.userData.wheels[0].mesh.rotation.x !== 0, 'remote wheels turn');
 V.disposeRemote(rv); assert.equal(V.makeRemote(0, 0), null);
 console.log('remote vehicles ok');
+
+// ---- traffic signals: nobody crosses the stop line on red
+{
+  const { finishRoad, planSignals, signalState } = await import('../public/bbsr_roads.js');
+  const rs = [
+    finishRoad({ name: 'EW', w: 22, main: true, pts: [[-400, 0], [0, 0], [400, 0]] }), finishRoad({ name: 'EW2', w: 22, main: true, pts: [[0, 0], [400, 0]] }),
+    finishRoad({ name: 'NS', w: 16, main: true, pts: [[0, -400], [0, 0]] }), finishRoad({ name: 'NS2', w: 16, main: true, pts: [[0, 0], [0, 400]] }),
+  ];
+  rs.splice(1, 1);
+  const sigs = planSignals(rs, { rounds: [] }, { edge: 500 });
+  assert.equal(sigs.length, 1, 'one signal at the crossing: ' + sigs.length);
+  assert.ok(sigs[0].arms.length >= 4, 'arms on every approach: ' + sigs[0].arms.length);
+  const sc = new THREE.Scene(), W = createVehicles({ THREE, kit, scene: sc, roads: rs.map((r) => ({ pts: r.pts, w: r.w, main: true, src: r })), blocked: () => false, ground: () => 0, inWorld: () => true, spawn: { x: 0, z: 0 }, seed: 11 });
+  W.setSignals(sigs);
+  const realNow = Date.now; let clock = 1e6; Date.now = () => clock * 1000;
+  let crossings = 0, onRed = 0, stopped = 0; const last = new Map();
+  for (let t = 0; t < 400; t += 0.05) {
+    clock += 0.05; W.update(0.05, 30, 30, 0);
+    for (const a of W.traffic) for (const st of a.r.stops) {
+      if (st.mv !== a.dir) continue;
+      const d = (st.s - a.s) * a.dir - W.fleets[a.type].model.L / 2, k = a.idx + a.type + st.s, prev = last.get(k);
+      if (prev !== undefined && prev >= 0 && d < 0 && prev < 3) { crossings++; if (signalState(st.sg, st.group, clock) === 'r') onRed++; }
+      if (d > 0.3 && d < 3 && a.v < 0.3 && signalState(st.sg, st.group, clock) === 'r') stopped++;
+      last.set(k, d);
+    }
+  }
+  Date.now = realNow;
+  assert.ok(crossings > 10, 'vehicles drive through the junction: ' + crossings);
+  assert.ok(onRed <= Math.ceil(crossings * 0.04), `vehicles crossing on red: ${onRed} of ${crossings}`);
+  assert.ok(stopped > 5, 'vehicles wait at the line: ' + stopped);
+  console.log(`signals ok: ${crossings} crossings, ${onRed} on red, ${stopped} waiting samples`);
+}

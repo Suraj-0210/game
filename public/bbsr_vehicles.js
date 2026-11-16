@@ -1,6 +1,7 @@
 // Vehicles in the city: parked cars you can get into, traffic that keeps to the left on the real roads, and the driving itself.
 // Needs no DOM: the game passes in what it knows (roads, collision test, ground height).
 import { PAINTS } from './bbsr_vehicles_kit.js';
+import { laneOffset, signalState } from './bbsr_roads.js';
 
 const TAU = Math.PI * 2;
 const angDiff = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
@@ -10,7 +11,8 @@ export const TYPE_BY_ID = [null, 'hatch', 'sedan', 'suv', 'auto', 'bus', 'truck'
 const PAINT_OF = { auto: [0x2e8b57, 0xf0c020, 0x2e8b57, 0xe6b800], bus: [0xc23b22, 0x1d5fa8], truck: [0xcf5a1a, 0x2a5da8, 0x4f6b3a, 0x8c2f2f] };
 const TRAFFIC_MIX = [['hatch', 0.3], ['sedan', 0.2], ['suv', 0.12], ['auto', 0.16], ['bus', 0.09], ['truck', 0.13]];
 const PARKED_MIX = [['hatch', 0.38], ['sedan', 0.26], ['suv', 0.16], ['auto', 0.14], ['truck', 0.06]];
-const CAPACITY = { hatch: 110, sedan: 90, suv: 60, auto: 70, bus: 14, truck: 36 };
+const CAPACITY = { hatch: 50, sedan: 40, suv: 28, auto: 36, bus: 10, truck: 18 };
+const CELL = 240;
 
 function mulberry(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 const pickMix = (mix, r) => { let a = 0; for (const [k, w] of mix) { a += w; if (r < a) return k; } return mix[0][0]; };
@@ -28,11 +30,13 @@ export function prepareRoads(roads) {
     }
     const len = cum[cum.length - 1];
     if (len < 25) continue;
-    out.push({ pts: r.pts, w: r.w, main: !!r.main, cum, len, n: r.pts.length, x0, x1, z0, z1, id: out.length });
+    const S = r.src || r;
+    out.push({ pts: r.pts, w: r.w, main: !!r.main, cum, len, n: r.pts.length, x0, x1, z0, z1, id: out.length, src: S, oneway: !!S.oneway, cw: S.cw || Math.max(3.2, r.w - 2), lanes: S.lanes || 1, med: S.med || 0, laneW: S.laneW || 3.3, stops: [] });
   }
   for (const r of out) for (const e of [0, 1]) { const p = r.pts[e ? r.n - 1 : 0], k = key(p[0], p[1]); if (!ends.has(k)) ends.set(k, []); ends.get(k).push({ r, end: e, x: p[0], z: p[1] }); }
   const near = (x, z, rad) => { const l = []; for (let cx = Math.floor((x - rad) / 20); cx <= Math.floor((x + rad) / 20); cx++) for (let cz = Math.floor((z - rad) / 20); cz <= Math.floor((z + rad) / 20); cz++) { const a = ends.get(cx + ',' + cz); if (a) for (const e of a) if (Math.hypot(e.x - x, e.z - z) <= rad) l.push(e); } return l; };
-  return { roads: out, near };
+  const bySrc = new Map(); for (const o of out) bySrc.set(o.src, o);
+  return { roads: out, near, bySrc };
 }
 // point and direction on a road at arc length s
 function locate(r, s, hint) { let i = Math.min(hint | 0, r.n - 2); while (i > 0 && r.cum[i] > s) i--; while (i < r.n - 2 && r.cum[i + 1] < s) i++; return i; }
@@ -42,11 +46,11 @@ function pointOn(r, s, hint, out) {
   return out;
 }
 
-export function createVehicles({ THREE, kit, scene, roads, blocked, ground, inWorld, spawn, seed = 7, lite = false, getAudio }) {
+export function createVehicles({ THREE, kit, scene, roads, blocked, ground, inWorld, spawn, seed = 7, lite = false, getAudio, reach = lite ? 560 : 780 }) {
   const rnd = mulberry(seed), world = prepareRoads(roads);
   const fleets = {};
   for (const k of kit.TYPE_KEYS) fleets[k] = kit.createFleet(k, CAPACITY[k], scene);
-  const flush = () => { for (const k in fleets) fleets[k].flush(); };
+  const flush = () => { for (const k in fleets) fleets[k].flush(); for (const l of pfleets.values()) for (const f of l) f.flush(); };
 
   // ---------------- parked cars ----------------
   const parked = [], pgrid = new Map(), PK = (x, z) => Math.floor(x / 12) + ',' + Math.floor(z / 12);
@@ -54,12 +58,21 @@ export function createVehicles({ THREE, kit, scene, roads, blocked, ground, inWo
   const gridDel = (c) => { const a = pgrid.get(PK(c.x, c.z)); if (a) { const i = a.indexOf(c); if (i >= 0) a.splice(i, 1); } };
   const parkedNear = (x, z, rad) => { const l = []; for (let cx = Math.floor((x - rad) / 12); cx <= Math.floor((x + rad) / 12); cx++) for (let cz = Math.floor((z - rad) / 12); cz <= Math.floor((z + rad) / 12); cz++) { const a = pgrid.get(cx + ',' + cz); if (a) for (const c of a) l.push(c); } return l; };
   const model = (t) => kit.model(t);
+  // parked cars live in small fleets, one per kind and 240 m cell, so the camera and the distance check skip the ones you cannot see
+  const pfleets = new Map();
+  function parkedFleet(type, x, z) {
+    const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL), key = type + '|' + cx + ',' + cz;
+    let l = pfleets.get(key); if (!l) pfleets.set(key, (l = []));
+    let f = l.find((q) => q.free > 0);
+    if (!f) { f = kit.createFleet(type, 10, scene); f.bounds((cx + 0.5) * CELL, (cz + 0.5) * CELL, CELL * 0.75 + 8); l.push(f); }
+    return f;
+  }
   function placeParked(type, x, z, yaw, hex) {
-    const f = fleets[type], idx = f.alloc(hex); if (idx < 0) return null;
-    const c = { type, x, z, y: ground(x, z), yaw, hex, idx, parked: true };
+    const f = parkedFleet(type, x, z), idx = f.alloc(hex); if (idx < 0) return null;
+    const c = { type, x, z, y: ground(x, z), yaw, hex, idx, fl: f, parked: true };
     f.set(idx, c.x, c.y, c.z, yaw); gridAdd(c); parked.push(c); return c;
   }
-  function removeParked(c) { fleets[c.type].release(c.idx); gridDel(c); const i = parked.indexOf(c); if (i >= 0) parked.splice(i, 1); }
+  function removeParked(c) { c.fl.release(c.idx); gridDel(c); const i = parked.indexOf(c); if (i >= 0) parked.splice(i, 1); }
   // is a car shape (two circles along its length) in the way of something solid?
   const carBlocked = (type, x, z, yaw, py) => {
     const m = model(type), sx = -Math.sin(yaw), sz = -Math.cos(yaw), h = m.L / 2 - m.W / 2 + 0.2, r = m.W / 2 + 0.05;
@@ -83,7 +96,7 @@ export function createVehicles({ THREE, kit, scene, roads, blocked, ground, inWo
       if (r.w < 6.5 || r.len < 50) continue;
       for (let s = 14 + rnd() * 12; s < r.len - 14; s += 22 + rnd() * 26) {
         const P = pointOn(r, s, 0, {}), side = rnd() < 0.5 ? 1 : -1;       // side 1 = the left of the travel direction
-        const off = r.w / 2 - 1.15, lx = P.dz, lz = -P.dx;
+        const off = r.cw / 2 - 1.15, lx = P.dz, lz = -P.dx;
         cands.push({ x: P.x + lx * off * side, z: P.z + lz * off * side, yaw: Math.atan2(-P.dx * side, -P.dz * side), w: r.w, r });
       }
     }
@@ -113,22 +126,25 @@ export function createVehicles({ THREE, kit, scene, roads, blocked, ground, inWo
     for (let tries = 0; tries < 12; tries++) {
       const r = cand[Math.floor(rnd() * cand.length)];
       if (!r.main && rnd() < 0.5) continue;
-      const s = 6 + rnd() * (r.len - 12), P = pointOn(r, s, 0, P0), dir = rnd() < 0.5 ? 1 : -1;
+      const s = 6 + rnd() * (r.len - 12), P = pointOn(r, s, 0, P0), dir = r.oneway || rnd() < 0.5 ? 1 : -1;
       const d = Math.hypot(P.x - px, P.z - pz);
       if (d < minD || d > maxD) continue;
-      let type = pickMix(TRAFFIC_MIX, rnd()); if (r.w < 8 && (type === 'bus' || type === 'truck')) type = 'hatch';
-      const off = Math.min(r.w * 0.25, 3.4), fx = P.dx * dir, fz = P.dz * dir, x = P.x + fz * off, z = P.z - fx * off;
+      let type = pickMix(TRAFFIC_MIX, rnd()); if (r.cw < 6.4 && (type === 'bus' || type === 'truck')) type = 'hatch';
+      const lane = pickLane(r, type), off = laneOffset(r, lane), fx = P.dx * dir, fz = P.dz * dir, x = P.x + fz * off, z = P.z - fx * off;
       if (!inWorld(x, z) || ground(x, z) < -0.4 || blocked(x, z, 1.2, ground(x, z))) continue;
       let clash = false; for (const o of traffic) if (Math.hypot(o.x - x, o.z - z) < 11) { clash = true; break; }
       if (clash || parkedNear(x, z, 4).some((o) => Math.hypot(o.x - x, o.z - z) < 3.5)) continue;
       const hex = paintFor(type, rnd), idx = fleets[type].alloc(hex); if (idx < 0) continue;
-      return { type, idx, r, s, dir, seg: P.i, x, z, y: ground(x, z), yaw: Math.atan2(-fx, -fz), v: 0, vmax: (type === 'bus' ? 8 : type === 'truck' ? 7.5 : type === 'auto' ? 6.5 + rnd() * 2.5 : 8.5 + rnd() * 5.5) * (r.main ? 1 : 0.75), off, wait: 0, ghost: 0, hex };
+      return { type, idx, r, s, dir, lane, seg: P.i, x, z, y: ground(x, z), yaw: Math.atan2(-fx, -fz), v: 0, vmax: (type === 'bus' ? 8 : type === 'truck' ? 7.5 : type === 'auto' ? 6.5 + rnd() * 2.5 : 8.5 + rnd() * 5.5) * (r.main ? 1 : 0.75), off, wait: 0, ghost: 0, hex };
     }
     return null;
   }
+  // slow vehicles keep to the left-most lane, cars use any
+  const pickLane = (r, type) => { const n = Math.max(1, r.lanes | 0), slow = type === 'bus' || type === 'truck' || type === 'auto'; return slow ? (r.oneway ? 0 : n - 1) : Math.floor(rnd() * n); };
   const dropAgent = (a) => { fleets[a.type].release(a.idx); const i = traffic.indexOf(a); if (i >= 0) traffic.splice(i, 1); };
   let spawnT = 0, filled = false;
   function stepTraffic(dt, px, pz, cur) {
+    const nowSec = Date.now() / 1000;
     // keep about `target` vehicles around the player
     spawnT -= dt;
     if (!filled) { for (let i = 0; i < target; i++) { const a = newAgent(px, pz, 30, 300); if (a) traffic.push(a); } filled = true; }
@@ -150,17 +166,37 @@ export function createVehicles({ THREE, kit, scene, roads, blocked, ground, inWo
         if (cur) check(cur.x, cur.z, Math.max(0, cur.v), cur.L / 2);
         for (const c of parkedNear(a.x + fx * 6, a.z + fz * 6, 6)) { const rx = c.x - a.x, rz = c.z - a.z, f = rx * fx + rz * fz; if (f > 0 && f < look && Math.abs(rx * fz - rz * fx) < 1.7) vt = 0; }
       } else a.ghost -= dt;
+      // traffic signals: stop at the line on red (and on amber when there is room to stop)
+      let sigHold = false;
+      for (const st of r.stops) {
+        if (st.mv !== a.dir) continue;
+        const d = (st.s - a.s) * a.dir - m.L / 2;
+        if (d < -0.3 || d > 55) continue;
+        const state = signalState(st.sg, st.group, nowSec);
+        if (state === 'g' || (state === 'a' && d < (a.v * a.v) / 6.4 + 0.6)) continue;
+        const lim = d < 0.5 ? 0 : Math.sqrt(2 * 2.4 * Math.max(0, d - 0.8));
+        if (lim < vt) { vt = lim; sigHold = true; }
+      }
       a.v += Math.max(-10 * dt, Math.min(2.6 * dt * (GAPV[a.type] || 1), vt - a.v));
-      a.wait = a.v < 0.3 && vt < 0.3 ? a.wait + dt : 0;
+      a.wait = a.v < 0.3 && vt < 0.3 && !sigHold ? a.wait + dt : 0;
       if (a.wait > 7) { a.ghost = 3; a.wait = 0; }
       a.s += a.dir * a.v * dt;
       if (a.s >= r.len || a.s <= 0) {
-        const end = a.s >= r.len ? 1 : 0, p = r.pts[end ? r.n - 1 : 0], opts = world.near(p[0], p[1], 14).filter((e) => e.r !== r);
-        if (opts.length) { const e = opts[Math.floor(rnd() * opts.length)]; a.r = e.r; a.dir = e.end ? -1 : 1; a.s = e.end ? e.r.len - 0.1 : 0.1; a.seg = 0; if (e.r.w < 8 && (a.type === 'bus' || a.type === 'truck')) a.v = Math.min(a.v, 3); a.vmax = Math.max(a.vmax, 5.5) * (e.r.main ? 1 : 0.9); }
+        const end = a.s >= r.len ? 1 : 0, p = r.pts[end ? r.n - 1 : 0], fwx = -Math.sin(a.yaw), fwz = -Math.cos(a.yaw);
+        // roads that start here (one-way roads only in their own direction), not turning back on ourselves
+        const opts = world.near(p[0], p[1], 14).filter((e) => {
+          if (e.r === r || (e.r.oneway && e.end !== 0)) return false;
+          const q = e.end ? e.r.pts[e.r.n - 2] : e.r.pts[1], l = Math.hypot(q[0] - e.x, q[1] - e.z) || 1;   // the way we would head after entering it
+          return ((q[0] - e.x) / l) * fwx + ((q[1] - e.z) / l) * fwz > -0.35;
+        });
+        if (opts.length) {
+          const e = opts[Math.floor(rnd() * opts.length)]; a.r = e.r; a.dir = e.end ? -1 : 1; a.s = e.end ? e.r.len - 0.1 : 0.1; a.seg = 0; a.lane = pickLane(e.r, a.type);
+          if (e.r.cw < 6.4 && (a.type === 'bus' || a.type === 'truck')) a.v = Math.min(a.v, 3); a.vmax = Math.max(a.vmax, 5.5) * (e.r.main ? 1 : 0.9);
+        } else if (r.oneway) { dropAgent(a); continue; }
         else { a.dir = -a.dir; a.s = Math.max(0.1, Math.min(r.len - 0.1, a.s)); a.v *= 0.3; }
       }
       const R = a.r, P = pointOn(R, a.s, a.seg, P0); a.seg = P.i;
-      const fdx = P.dx * a.dir, fdz = P.dz * a.dir, offT = Math.min(R.w * 0.25, 3.4);
+      const fdx = P.dx * a.dir, fdz = P.dz * a.dir, offT = laneOffset(R, a.lane);
       a.off += (offT - a.off) * Math.min(1, dt * 2.5);
       a.x = P.x + fdz * a.off; a.z = P.z - fdx * a.off;
       a.yaw += angDiff(a.yaw, Math.atan2(-fdx, -fdz)) * Math.min(1, dt * 5);
@@ -311,12 +347,14 @@ export function createVehicles({ THREE, kit, scene, roads, blocked, ground, inWo
   }
   function disposeRemote(rv) { scene.remove(rv.group); kit.disposeGroup(rv.group); }
 
+  let cullN = 0;
   // ---------------- per frame ----------------
   function update(dt, px, pz, night, soundOn = true) {
     lightsOn = lightsManual === null ? night > 0.4 : lightsManual;
     kit.mats.head.emissiveIntensity = night > 0.4 ? 2.2 : 0.35; kit.mats.tail.emissiveIntensity = night > 0.4 ? 0.8 : 0.3;
     stepTraffic(dt, px, pz, cur);
     flush();
+    if ((cullN = (cullN + 1) % 10) === 0) for (const l of pfleets.values()) for (const f of l) f.show(Math.hypot(f.cx - px, f.cz - pz) < reach + CELL * 0.75);
     if (cur) {
       const c = cur, fx = -Math.sin(c.yaw), fz = -Math.cos(c.yaw);
       headlight.intensity = lightsOn ? 140 : 0;
@@ -344,8 +382,11 @@ export function createVehicles({ THREE, kit, scene, roads, blocked, ground, inWo
     }
     return false;
   }
+  function setSignals(list) {
+    for (const sg of list) for (const arm of sg.arms) { const pr = world.bySrc.get(arm.road); if (pr) pr.stops.push({ s: arm.s - arm.mv * arm.clr, mv: arm.mv, sg, group: arm.group }); }
+  }
   return {
-    parked, traffic, fleets, world, seedParked, enter, exit, drive, update, nearestParked, solid, toggleLights, makeRemote, animateRemote, disposeRemote,
+    setSignals, parked, traffic, fleets, world, seedParked, enter, exit, drive, update, nearestParked, solid, toggleLights, makeRemote, animateRemote, disposeRemote,
     get cur() { return cur; }, get lightsOn() { return lightsOn; }, flush,
   };
 }

@@ -51,3 +51,24 @@ and traffic keeps to the left on them (`public/bbsr_vehicles.js`); everything fa
 - The car follows ramps, flyovers and the Khandagiri hill, stops at walls, buildings and other vehicles, and the traffic brakes for you.
 - Other players see your car (kind and colour travel with the normal `move` message).
 - Test without a browser: `node tools/test_vehicles.mjs`. Preview the models: open `/vehicles_showcase.html?all=1` (or `?k=sedan&v=side`).
+
+## Roads, lanes and traffic lights
+
+Roads are built from their real class (`public/bbsr_roads.js`), not as plain strips:
+
+- **Cross-section:** 3.3–3.6 m lanes, a kerbed and planted median with shrubs and street lights on divided roads, edge lines, dashed
+  lane lines, double yellow centre lines on wide undivided roads, footpaths with a kerb stripe. Trunk and primary roads are 2+2 lanes or
+  more; side streets are 1+1.
+- **Dual carriageways:** OpenStreetMap maps them as two one-way roads. They are paired automatically, each half gets 2–3 lanes, and the
+  median between them is drawn (and kept free of houses). One-way roads are one-way for the traffic too.
+- **Curves:** every road is smoothed through its mapped points (centripetal Catmull-Rom), so junctions stay put and bends are round. The
+  traffic follows the same curve.
+- **Signals:** the busiest junctions of main roads get signals with stop lines and zebra crossings, on a 46 s cycle (green, amber,
+  all-red, then the cross road). The clock is the wall clock, so everyone sees the same colours. Traffic stops on red and on amber when
+  it can. (The OpenStreetMap extract has only 12 signal nodes, none inside the six areas, so positions come from the road layout; if
+  the map data has `highway=traffic_signals` nodes they are used: `tools/make_real_zones.py` exports them as `signals`.)
+- **Streaming:** road and building meshes are split into 150–200 m chunks and parked cars into 240 m cells; the camera skips chunks it
+  cannot see and chunks beyond the fog distance are not drawn (phones use a shorter distance). Whole areas are hidden when you are far
+  away, and traffic exists only around you. At Jaydev Vihar this took a frame from about 1.5 M to 0.8 M triangles.
+- Tests: `node tools/test_roads.mjs` (curves, lane layouts, chunks and signals on all six real areas) and `node tools/test_vehicles.mjs`
+  (includes a red-light test).
