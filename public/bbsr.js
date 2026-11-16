@@ -304,8 +304,29 @@ const keys = {};
 const touch = { mx: 0, my: 0, jump: false, run: false };
 let thirdPerson = false, selfAvatar = null, ready = false;
 const PR = 0.35;
+let resumed = false;
 
+const POS_KEY = 'vw_pos_' + (typeof CITY !== 'undefined' && CITY ? 'city' : 'zone');
+function savePos() {
+  if (!spawned || !isFinite(player.x)) return;
+  try {
+    const dv = driving(), x = dv ? veh.cur.x : player.x, z = dv ? veh.cur.z : player.z;
+    localStorage.setItem(POS_KEY, JSON.stringify({ x: Math.round(x * 10) / 10, z: Math.round(z * 10) / 10, y: Math.round(player.y * 10) / 10, yaw: Math.round((dv ? veh.cur.yaw : player.yaw) * 100) / 100, pitch: player.pitch, fly: !!player.fly && !dv }));
+  } catch (e) { /* private window: no resume */ }
+}
+function restorePos() {
+  try {
+    const q = JSON.parse(localStorage.getItem(POS_KEY) || 'null');
+    if (!q || !isFinite(q.x) || !isFinite(q.z) || !inWorld(q.x, q.z)) return false;
+    player.fly = !!q.fly; player.x = q.x; player.z = q.z; player.vy = 0; player.yaw = q.yaw || 0; player.pitch = q.pitch || 0;
+    player.y = q.fly && isFinite(q.y) ? q.y : ground(q.x, q.z);
+    return true;
+  } catch (e) { return false; }
+}
+window.addEventListener('pagehide', savePos); window.addEventListener('beforeunload', savePos);
+document.addEventListener('visibilitychange', () => { if (document.hidden) savePos(); });
 function spawn() {
+  if (restorePos()) { resumed = true; return; }
   const sp = plan.spawn;
   for (let tries = 0; tries < 60; tries++) {
     const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * sp.r, x = sp.x + Math.cos(a) * r, z = sp.z + Math.sin(a) * r;
@@ -903,7 +924,7 @@ function connect() {
     for (const id of doorBoxes.keys()) setDoorOpen(id, !!(doors && doors[id]), false);
     for (const id of [...others.keys()]) removeOther(id);
     voice.setSelf(selfId);
-    if (!spawned) { spawn(); spawned = true; hud.toast(CITY ? 'Welcome to Bhubaneswar. Roads and auto stands link the whole city.' : 'Welcome to ' + ZONE_BY_ID[ZONE].name + (ZONE === 'oldtown' ? '' : '. Find the auto stand to go back.'), 4200); if (CITY) { lastArea = 'oldtown'; welcomed = true; } }
+    if (!spawned) { spawn(); spawned = true; hud.toast(resumed ? 'Welcome back. You are where you left off.' : CITY ? 'Welcome to Bhubaneswar. Roads and auto stands link the whole city.' : 'Welcome to ' + ZONE_BY_ID[ZONE].name + (ZONE === 'oldtown' ? '' : '. Find the auto stand to go back.'), 4200); if (CITY) { lastArea = 'oldtown'; welcomed = true; } }
     rebuildSelf();
     for (const p of Object.values(players)) if (p.id !== selfId) addOther(p);
     ready = true;
@@ -951,6 +972,7 @@ function frame(now) {
     if (active()) { if (driving()) updateDrive(dt); else updatePlayer(dt, now); updateInteraction(); } else if (!hud.isChatOpen()) hud.setPrompt(null);
     if (veh) veh.update(dt, player.x, player.z, ts.night, audio.isOn());
     if (frameNo % 6 === 0) updateCoords();
+    if (frameNo % 90 === 0) savePos();
     sendPosition(now, false);
     updateOthers(dt, t);
     indoors = isIndoors(player.x, player.z, player.y);
