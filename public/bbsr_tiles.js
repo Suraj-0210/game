@@ -27,7 +27,7 @@ function streetIndex(roads) {
   };
 }
 
-export function createTiles({ THREE, M, scene, addBoxCollider, shadows = true, lite = false, base = '/data/city/' }) {
+export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, shadows = true, lite = false, base = '/data/city/' }) {
   let index = null, T = 500;
   const tiles = new Map(), ready = [];             // key -> { state, group, chunks, cols, data }
   const mapRoads = [];                                // every street of the built tiles, for the minimap
@@ -51,7 +51,7 @@ export function createTiles({ THREE, M, scene, addBoxCollider, shadows = true, l
       for (const m of RD.meshes) { group.add(m.mesh); chunks.push(m); }
     }
     // ---- buildings ----
-    const dist = streetIndex(roads), fa = new Batch(THREE), roofs = new Batch(THREE), fur = new Batch(THREE), heads = new Batch(THREE);
+    const dist = streetIndex(roads), fa = new Batch(THREE), roofs = new Batch(THREE), fur = new Batch(THREE), heads = new Batch(THREE), treeGeos = [];
     let seed = (t.ix * 73856093) ^ (t.iz * 19349663);
     const rand = () => { seed = (seed + 0x6d2b79f5) | 0; let a = Math.imul(seed ^ (seed >>> 15), 1 | seed); a = (a + Math.imul(a ^ (a >>> 7), 61 | a)) ^ a; return ((a ^ (a >>> 14)) >>> 0) / 4294967296; };
     for (const [x, z, bw, bd, yaw, fl] of data.b) {
@@ -95,8 +95,42 @@ export function createTiles({ THREE, M, scene, addBoxCollider, shadows = true, l
           carry = Math.max(0, carry - L) ;
         }
       }
+      // ---- street trees: big shady canopies along the roadside, as in the street-view of Nandankanan Road and Service Road ----
+      const TREE = { trunk: 0.9, primary: 0.85, secondary: 0.8, tertiary: 0.6, residential: 0.45, unclassified: 0.35, living_street: 0.4 }, GREEN = [0x3f7a35, 0x4b8a3c, 0x5a9a44, 0x356b2e, 0x66a04a];
+      let planted = 0;
+      const CANOPY = new THREE.IcosahedronGeometry(1, 1).toNonIndexed(), TRUNK = new THREE.CylinderGeometry(0.16, 0.26, 1, 6).toNonIndexed(), TRUNK_COL = new THREE.Color(0x5b4630);
+      for (const r of roads) {
+        const pt = (TREE[r.kind] || 0) * (lite ? 0.55 : 1); if (!pt || r.round) continue;
+        const off0 = (r.cw || r.w) / 2 + (r.foot || 0) + (r.medHalf || 0) + 1.3;
+        let carry = rand() * 8;
+        for (let i = 0; i + 1 < r.pts.length && planted < 700; i++) {
+          const a = r.pts[i], b = r.pts[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L < 1) continue;
+          const tx = (b[0] - a[0]) / L, tz = (b[1] - a[1]) / L;
+          for (let s = carry; s < L; s += 12 + rand() * 8) {
+            for (const side of [-1, 1]) {
+              if (rand() > pt) continue;
+              const x = a[0] + tx * s - tz * side * off0, z = a[1] + tz * s + tx * side * off0;
+              if (x < x0 || x >= x0 + T || z < z0 || z >= z0 + T || inArea(x, z) || dist(x, z) < 0.6 || near(x, z, 2.2)) continue;
+              put(x, z, 2.2); planted++;
+              const th = 2.6 + rand() * 1.4, cw = 2.4 + rand() * 1.6, ch = 2.0 + rand() * 1.2, col = new THREE.Color(GREEN[Math.floor(rand() * GREEN.length)]);
+              const paint = (g, c) => { const n = g.attributes.position.count, a = new Float32Array(n * 3); for (let q = 0; q < n; q++) { a[q * 3] = c.r; a[q * 3 + 1] = c.g; a[q * 3 + 2] = c.b; } g.setAttribute('color', new THREE.BufferAttribute(a, 3)); return g; };
+              const tk = TRUNK.clone().scale(1, th, 1).translate(x, th / 2, z);
+              treeGeos.push(paint(tk, TRUNK_COL));
+              for (const [dx, dy, dz, k] of [[0, th + ch * 0.35, 0, 1], [cw * 0.45, th + ch * 0.1, cw * 0.2, 0.72], [-cw * 0.4, th + ch * 0.15, -cw * 0.25, 0.68]])
+                treeGeos.push(paint(CANOPY.clone().scale(cw * k, ch * k, cw * k).rotateY(rand() * 6).translate(x + dx, dy, z + dz), col));
+            }
+            carry = 0;
+          }
+          carry = Math.max(0, carry - L);
+        }
+      }
     }
     for (const l of stub.lamps) { fur.box(l.x, l.z, 0, 0.16, 4.8, 0.16, 0, 0x3a3f44, { us: 2, vs: 2 }); heads.box(l.x, l.z, 4.8, 0.55, 0.22, 0.55, 0, 0xffffff, { us: 2, vs: 2 }); }
+    if (treeGeos.length) {
+      const g = mergeGeometries(treeGeos, false), m = new THREE.Mesh(g, M.plain); m.castShadow = false; group.add(m);
+      for (const q of treeGeos) q.dispose();
+      chunks.push({ mesh: m, x: (t.ix + 0.5) * T, z: (t.iz + 0.5) * T, always: true });
+    }
     addC(fa, M.facade, shadows); addC(roofs, M.plain, shadows); addC(fur, M.plain, false); addC(heads, M.lamp, false);
     scene.add(group);
     const mr = roads.map((r) => { let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9; for (const p of r.pts) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); z0 = Math.min(z0, p[1]); z1 = Math.max(z1, p[1]); } return { w: r.cw || r.w, pts: r.pts, main: r.main, b: [x0, z0, x1, z1] }; });
@@ -144,7 +178,7 @@ export function createTiles({ THREE, M, scene, addBoxCollider, shadows = true, l
       if (t.state === 'built') {
         const cx = (t.ix + 0.5) * T, cz = (t.iz + 0.5) * T, dx = Math.max(Math.abs(px - cx) - T / 2, 0), dz = Math.max(Math.abs(pz - cz) - T / 2, 0), d = Math.hypot(dx, dz);
         if (d > reach + 500) { drop(t); continue; }
-        for (const c of t.chunks) c.mesh.visible = Math.hypot(c.x - px, c.z - pz) < reach + 100;
+        for (const c of t.chunks) if (!c.always) c.mesh.visible = Math.hypot(c.x - px, c.z - pz) < reach + 100;
       } else if (t.state === 'ready' && !want.has(t.key)) t.state = 'new';
     }
     frame++;

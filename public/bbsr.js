@@ -1061,7 +1061,7 @@ async function buildCityWorld(osm) {
   const g = new THREE.PlaneGeometry(W, D).rotateX(-Math.PI / 2), uv = g.attributes.uv;
   for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (W / 8), uv.getY(i) * (D / 8));
   const gnd = new THREE.Mesh(g, M0.ground); gnd.position.set((BOUNDS.x0 + BOUNDS.x1) / 2, -0.02, (BOUNDS.z0 + BOUNDS.z1) / 2); gnd.receiveShadow = true; scene.add(gnd);
-  cityTiles = createTiles({ THREE, M: M0, scene, addBoxCollider, shadows: !LITE, lite: LITE }); await cityTiles.init();   // every other street and building of the city streams in around you
+  cityTiles = createTiles({ THREE, mergeGeometries, M: M0, scene, addBoxCollider, shadows: !LITE, lite: LITE }); await cityTiles.init();   // every other street and building of the city streams in around you
   const conn = { group: new THREE.Group(), links: cityTiles.mapRoads, roads: [], chunks: [] };
   parts.forEach((pt) => offsetPlan(pt.plan, pt.ox, pt.oz));      // gameplay data moves into world coordinates (meshes already sit in place)
   const cat = (k) => parts.flatMap((pt) => pt.plan[k] || []), old = parts[0].plan;
