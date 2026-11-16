@@ -172,6 +172,33 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
       addC(deck, M.plain, shadows); addC(piers, M.plain, shadows); addC(marks, M.plain, false);
       const list = flyovers(); for (const f of fos) list.push(f);
     }
+    // ---- bridges: where a street runs across water it gets stone parapets on both sides, so it reads as a bridge ----
+    if (water.length) {
+      const inW = (x, z) => {
+        for (const w of water) {
+          if (x < w.b[0] || x > w.b[2] || z < w.b[1] || z > w.b[3]) continue;
+          const P = w.pts;
+          if (w.line) { for (let i = 0; i + 1 < P.length; i++) { const dx = P[i + 1][0] - P[i][0], dz = P[i + 1][1] - P[i][1], l2 = dx * dx + dz * dz || 1, u = Math.max(0, Math.min(1, ((x - P[i][0]) * dx + (z - P[i][1]) * dz) / l2)); if (Math.hypot(x - P[i][0] - dx * u, z - P[i][1] - dz * u) < w.hw / 0.4 / 2) return true; } }
+          else { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) if ((P[i][1] > z) !== (P[j][1] > z) && x < ((P[j][0] - P[i][0]) * (z - P[i][1])) / (P[j][1] - P[i][1]) + P[i][0]) c = !c; if (c) return true; }
+        }
+        return false;
+      };
+      const br = new Batch(THREE);
+      for (const r of roads) {
+        if (!r.w || r.w < 5 || r.kind === 'footway' || r.kind === 'path' || r.kind === 'steps' || r.kind === 'track') continue;
+        const P = r.pts, half = (r.cw || r.w) / 2 + 0.25;
+        for (let i = 0; i + 1 < P.length; i++) {
+          const a = P[i], b = P[i + 1], len = Math.hypot(b[0] - a[0], b[1] - a[1]); if (len < 1) continue;
+          const tx = (b[0] - a[0]) / len, tz = (b[1] - a[1]) / len, yaw = Math.atan2(-tz, tx), n = Math.max(1, Math.round(len / 3)), sl = len / n;
+          for (let k = 0; k < n; k++) {
+            const mx = a[0] + tx * sl * (k + 0.5), mz = a[1] + tz * sl * (k + 0.5);
+            if (!inW(mx, mz)) continue;
+            for (const sd of [-1, 1]) br.box(mx - tz * sd * half, mz + tx * sd * half, 0, sl + 0.05, 0.95, 0.35, yaw, 0xc9c2b0);
+          }
+        }
+      }
+      addC(br, M.plain, shadows);
+    }
     // ---- water, green land, the airport (flat on the ground, under the streets) ----
     if (data.land && data.land.length) {
       const buf = {};

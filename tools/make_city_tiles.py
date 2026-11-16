@@ -176,8 +176,15 @@ def main(path):
     kept = []
     for r in roads:
         if r['elev']:
-            sample = r['pts']; hit = sum(1 for p in sample if near_ground(p))
-            if hit > 0.5 * len(sample): continue
+            # judge the middle of the deck only: its two ends always touch the ground road that leads onto it (that wrongly dropped every short bridge)
+            samp = []; acc = 0.0; tot = sum(math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(r['pts'], r['pts'][1:]))
+            for a, b in zip(r['pts'], r['pts'][1:]):
+                L_ = math.hypot(b[0] - a[0], b[1] - a[1])
+                for k in range(max(1, int(L_ // 4))):
+                    d_ = acc + L_ * k / max(1, int(L_ // 4))
+                    if 14 < d_ < tot - 14: samp.append((a[0] + (b[0] - a[0]) * k / max(1, int(L_ // 4)), a[1] + (b[1] - a[1]) * k / max(1, int(L_ // 4))))
+                acc += L_
+            if samp and sum(1 for p in samp if near_ground(p)) > 0.5 * len(samp): continue
         kept.append(r)
     roads = kept
     tiles = collections.defaultdict(lambda: {'roads': [], 'b': []})
