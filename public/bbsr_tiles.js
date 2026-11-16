@@ -3,9 +3,10 @@
 // world coordinates, so streets cross tile borders and area borders with no seam and no made-up connector roads.
 import { Batch } from './bbsr_mesh.js';
 import { finishRoad, pairDual, buildRoads } from './bbsr_roads.js';
+import { LAYOUT, HALF_TILE } from './bbsr_city.js';
 
 const PAL = [0xf4f0e6, 0xf4f0e6, 0xf2dfa0, 0xe8c27e, 0xf0b8b0, 0xb8dcc0, 0xa8c8e0, 0xd89070, 0xe9e2d2, 0xf7d3a0];
-const FLOORS = [1, 2, 2, 2, 3, 3, 3, 4];
+const FLOORS = [1, 2, 2, 2, 3, 3, 3, 4], FILLER = [1, 2, 2, 2, 3, 3, 4];
 
 // Place a building tile-side: skip anything that would sit on a street
 function streetIndex(roads) {
@@ -26,7 +27,7 @@ function streetIndex(roads) {
   };
 }
 
-export function createTiles({ THREE, M, scene, addBoxCollider, shadows = true, base = '/data/city/' }) {
+export function createTiles({ THREE, M, scene, addBoxCollider, shadows = true, lite = false, base = '/data/city/' }) {
   let index = null, T = 500;
   const tiles = new Map(), ready = [];             // key -> { state, group, chunks, cols, data }
   const mapRoads = [];                                // every street of the built tiles, for the minimap
@@ -61,6 +62,39 @@ export function createTiles({ THREE, M, scene, addBoxCollider, shadows = true, b
       fa.box(x, z, 0, w, h, d, yaw, color, { us: 6, vs: 3.2, top: false });
       roofs.box(x, z, h, w + 0.3, 0.4, d + 0.3, yaw, 0xcfc8b8, { sides: true });
       cols.push(addBoxCollider({ x, z, hw: w / 2, hd: d / 2, theta: yaw, y0: 0, y1: h + 1 }));
+    }
+    // ---- the houses the map does not have: Bhubaneswar is built up along its streets (see the satellite view), but OpenStreetMap only has some buildings ----
+    {
+      const G = 16, occ = new Map(), near = (x, z, r) => { const cx = Math.floor(x / G), cz = Math.floor(z / G); for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) { const l = occ.get((cx + i) + ',' + (cz + j)); if (l) for (const o of l) if (Math.hypot(o[0] - x, o[1] - z) < o[2] + r) return true; } return false; };
+      const put = (x, z, r) => { const k = Math.floor(x / G) + ',' + Math.floor(z / G); let l = occ.get(k); if (!l) occ.set(k, (l = [])); l.push([x, z, r]); };
+      for (const [x, z, bw, bd] of data.b) put(x, z, Math.hypot(Math.min(bw, 60), Math.min(bd, 60)) * 0.45);
+      const x0 = t.ix * T, z0 = t.iz * T, KIND = { residential: 0.85, living_street: 0.8, unclassified: 0.7, tertiary: 0.6, secondary: 0.3 }, keep = lite ? 0.55 : 1;
+      const inArea = (x, z) => { for (const id in LAYOUT) if (Math.abs(x - LAYOUT[id][0]) < HALF_TILE + 12 && Math.abs(z - LAYOUT[id][1]) < HALF_TILE + 12) return true; return false; };
+      let made = 0;
+      for (const r of roads) {
+        const pr = (KIND[r.kind] || 0) * keep; if (!pr || r.round) continue;
+        const off0 = (r.cw || r.w) / 2 + (r.foot || 0) + (r.medHalf || 0) + 2.2;
+        let carry = rand() * 10;
+        for (let i = 0; i + 1 < r.pts.length && made < 900; i++) {
+          const a = r.pts[i], b = r.pts[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L < 1) continue;
+          const tx = (b[0] - a[0]) / L, tz = (b[1] - a[1]) / L, yaw = Math.atan2(-tz, tx);
+          for (let s = carry; s < L; s += 14 + rand() * 9) {
+            for (const side of [-1, 1]) {
+              if (rand() > pr) continue;
+              const w = 7 + rand() * 7, d = 7 + rand() * 6, off = off0 + d / 2, x = a[0] + tx * s - tz * side * off, z = a[1] + tz * s + tx * side * off, rr = Math.hypot(w, d) / 2;
+              if (x < x0 || x >= x0 + T || z < z0 || z >= z0 + T || inArea(x, z)) continue;
+              if (dist(x, z) < rr * 0.7 || near(x, z, rr * 0.8)) continue;
+              put(x, z, rr * 0.8); made++;
+              const floors = FILLER[Math.floor(rand() * FILLER.length)], h = floors * 3.2 + 0.5;
+              fa.box(x, z, 0, w, h, d, yaw, PAL[Math.floor(rand() * PAL.length)], { us: 6, vs: 3.2, top: false });
+              roofs.box(x, z, h, w + 0.3, 0.4, d + 0.3, yaw, 0xcfc8b8, { sides: true });
+              cols.push(addBoxCollider({ x, z, hw: w / 2, hd: d / 2, theta: yaw, y0: 0, y1: h + 1 }));
+            }
+            carry = 0;
+          }
+          carry = Math.max(0, carry - L) ;
+        }
+      }
     }
     for (const l of stub.lamps) { fur.box(l.x, l.z, 0, 0.16, 4.8, 0.16, 0, 0x3a3f44, { us: 2, vs: 2 }); heads.box(l.x, l.z, 4.8, 0.55, 0.22, 0.55, 0, 0xffffff, { us: 2, vs: 2 }); }
     addC(fa, M.facade, shadows); addC(roofs, M.plain, shadows); addC(fur, M.plain, false); addC(heads, M.lamp, false);
