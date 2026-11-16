@@ -56,12 +56,15 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
       for (const m of RD.meshes) { group.add(m.mesh); chunks.push(m); }
     }
     // ---- buildings ----
-    const dist = streetIndex(roads), fa = new Batch(THREE), roofs = new Batch(THREE), fur = new Batch(THREE), heads = new Batch(THREE), treeGeos = [];
+    const dist = streetIndex(roads);
+    // a footprint (centre, width along yaw, depth) must not put any corner on a street
+    const onStreet = (x, z, w, d, yaw, slack) => { const c = Math.cos(yaw), n = Math.sin(yaw); for (const [a, b] of [[1, 1], [1, -1], [-1, 1], [-1, -1], [0, 0]]) { const px = x + a * w / 2 * c + b * d / 2 * n, pz = z - a * w / 2 * n + b * d / 2 * c; if (dist(px, pz) < slack) return true; } return false; };
+    const fa = new Batch(THREE), roofs = new Batch(THREE), fur = new Batch(THREE), heads = new Batch(THREE), treeGeos = [];
     let seed = (t.ix * 73856093) ^ (t.iz * 19349663);
     const rand = () => { seed = (seed + 0x6d2b79f5) | 0; let a = Math.imul(seed ^ (seed >>> 15), 1 | seed); a = (a + Math.imul(a ^ (a >>> 7), 61 | a)) ^ a; return ((a ^ (a >>> 14)) >>> 0) / 4294967296; };
     for (const [x, z, bw, bd, yaw, fl] of data.b) {
       const w = Math.min(bw, 60), d = Math.min(bd, 60), r = Math.hypot(w, d) / 2;
-      if (dist(x, z) < r * 0.35) continue;                                        // not on a street
+      if (dist(x, z) < r * 0.35 || onStreet(x, z, w, d, yaw, -0.2)) continue;      // not on a street
       const floors = fl > 0 ? Math.min(fl, 40) : FLOORS[Math.floor(rand() * FLOORS.length)];
       const h = floors >= 8 ? floors * 3.4 : floors * 3.2 + 0.5, color = floors >= 8 ? 0xb9c9d4 : PAL[Math.floor(rand() * PAL.length)];
       fa.box(x, z, 0, w, h, d, yaw, color, { us: 6, vs: 3.2, top: false });
@@ -89,7 +92,7 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
               if (rand() > pr) continue;
               const w = shop ? 8 + rand() * 6 : 7 + rand() * 7, d = 7 + rand() * 6, off = off0 + d / 2, x = a[0] + tx * s - tz * side * off, z = a[1] + tz * s + tx * side * off, rr = Math.hypot(w, d) / 2;
               if (x < x0 || x >= x0 + T || z < z0 || z >= z0 + T || inArea(x, z)) continue;
-              if (dist(x, z) < rr * 0.7 || near(x, z, rr * 0.8)) continue;
+              if (dist(x, z) < rr * 0.7 || onStreet(x, z, w, d, yaw, 1.2) || near(x, z, rr * 0.8)) continue;
               put(x, z, rr * 0.8); made++;
               const floors = shop ? SHOPF[Math.floor(rand() * SHOPF.length)] : FILLER[Math.floor(rand() * FILLER.length)], h = floors * 3.2 + 0.5;
               fa.box(x, z, 0, w, h, d, yaw, shop ? SHOPC[Math.floor(rand() * SHOPC.length)] : PAL[Math.floor(rand() * PAL.length)], { us: 6, vs: 3.2, top: false });
