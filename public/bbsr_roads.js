@@ -221,6 +221,14 @@ export function buildRoads(ctx, roads, M, plan) {
     const P = makePath(r.pts), cw = r.cw, hw = cw / 2, foot = r.foot, big = cw >= 5.2;
     // carriageway
     ribbon('road', P.v, -hw, hw, 0.03, 0xffffff, r, null, 8);
+    for (const e of [P.v[0], P.v[P.v.length - 1]]) {        // where this road ends on another road, fill the corner wedges the square road end leaves
+      if (!inside(e.x, e.z, r, 0.6)) continue;
+      const R = hw + 1.2, B = ch.get('road', e.x, e.z), cc = B.col(0xffffff), c = [e.x, 0.031, e.z], N = 14;
+      for (let k = 0; k < N; k++) {
+        const t0 = (k / N) * Math.PI * 2, t1 = ((k + 1) / N) * Math.PI * 2, p0 = [e.x + Math.cos(t0) * R, 0.031, e.z + Math.sin(t0) * R], p1 = [e.x + Math.cos(t1) * R, 0.031, e.z + Math.sin(t1) * R];
+        B.quad(c, p1, p0, c, [0, 1, 0], [[c[0] / 8, c[2] / 8], [p1[0] / 8, p1[2] / 8], [p0[0] / 8, p0[2] / 8], [c[0] / 8, c[2] / 8]], cc);
+      }
+    }
     if (r.name === 'Connector' && false) continue;
     // footpaths and kerbs
     if (foot > 0.3) for (const side of [-1, 1]) {
