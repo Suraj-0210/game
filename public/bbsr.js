@@ -369,6 +369,25 @@ function buildVehicles() {
   speedoEl.style.cssText = 'position:fixed;left:50%;top:128px;transform:translateX(-50%);display:none;padding:8px 18px;border-radius:12px;background:rgba(10,14,20,.62);color:#fff;font:600 15px system-ui,sans-serif;letter-spacing:.3px;z-index:6;pointer-events:none;text-align:center';
   document.body.appendChild(speedoEl);
 }
+// ---- position read-out, so a problem can be reported with an exact place (click it to copy) ----
+let coordEl = null, lastCoordText = '';
+function initCoords() {
+  coordEl = document.createElement('div');
+  coordEl.style.cssText = 'position:fixed;left:12px;top:252px;padding:6px 10px;border-radius:10px;background:rgba(10,14,20,.62);color:#fff;font:600 12px/1.45 ui-monospace,Menlo,Consolas,monospace;z-index:6;cursor:pointer;user-select:none;max-width:260px';
+  coordEl.title = 'Click to copy this position';
+  coordEl.addEventListener('click', () => { try { navigator.clipboard.writeText(lastCoordText); hud.toast('Position copied'); } catch (e) { hud.toast(lastCoordText, 6000); } });
+  document.body.appendChild(coordEl);
+}
+function updateCoords() {
+  if (!coordEl) return;
+  const x = player.x, z = player.z, a = CITY ? areaAt(x, z) : ZONE, name = a ? ZONE_BY_ID[a].name : 'Road between areas';
+  const o = a && CITY ? LAYOUT[a] : [0, 0], lx = x - o[0], lz = z - o[1];
+  const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'], fy = driving() ? veh.cur.yaw : player.yaw;
+  const hd = dirs[((Math.round((Math.atan2(-Math.sin(fy), -Math.cos(fy)) / Math.PI) * 4) % 8) + 8) % 8];   // forward is (-sin yaw, -cos yaw), north is -z
+  const rd = a && plan.nearestRoad ? '' : '';
+  lastCoordText = `${name} | local x ${lx.toFixed(0)}, z ${lz.toFixed(0)} | world x ${x.toFixed(0)}, z ${z.toFixed(0)} | y ${player.y.toFixed(1)} | facing ${hd}${rd}`;
+  coordEl.innerHTML = `<div>${name}</div><div>local&nbsp; x ${lx.toFixed(0)}&nbsp; z ${lz.toFixed(0)}</div><div>world&nbsp; x ${x.toFixed(0)}&nbsp; z ${z.toFixed(0)}</div><div>height ${player.y.toFixed(1)} · facing ${hd}</div>`;
+}
 function enterCar(c) {
   if (!veh || driving()) return;
   if (player.emote) stopEmote();
@@ -927,6 +946,7 @@ function frame(now) {
     const px = player.x, pz = player.z;
     if (active()) { if (driving()) updateDrive(dt); else updatePlayer(dt, now); updateInteraction(); } else if (!hud.isChatOpen()) hud.setPrompt(null);
     if (veh) veh.update(dt, player.x, player.z, ts.night, audio.isOn());
+    if (frameNo % 6 === 0) updateCoords();
     sendPosition(now, false);
     updateOthers(dt, t);
     indoors = isIndoors(player.x, player.z, player.y);
@@ -1073,7 +1093,7 @@ async function boot() {
   plan.boxes.forEach(addBoxCollider);
   plan.circles.forEach((c) => addCollider(c.x, c.z, c.r, c.y0, c.y1));
   buildNpcs();
-  buildVehicles();
+  buildVehicles(); initCoords();
   interactables = plan.interactables;
   glow = createLightGlow(THREE, CITY ? parts.flatMap((pt) => collectLights(pt.plan)) : collectLights(plan), { lite: LITE }); scene.add(glow.group);
   collectEnvMats();
