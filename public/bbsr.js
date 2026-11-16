@@ -366,6 +366,7 @@ function buildVehicles() {
     : plan.roads.map((r) => ({ pts: r.pts, w: r.w, main: r.main, src: r }));
   veh = createVehicles({ THREE, kit, scene, roads, blocked, ground, inWorld, spawn: plan.spawn, lite: LITE, getAudio: () => { audio.start(); return audio.getContext(); } });
   veh.seedParked(LITE ? 90 : 150);
+  if (cityTiles) cityTiles.setHooks({ add: (l) => veh.addRoads(l), remove: (set) => veh.removeRoads(set) });   // traffic drives on the streamed streets too
   veh.setSignals(CITY ? parts.flatMap((pt) => pt.plan.signals || []) : plan.signals || []);
   speedoEl = document.createElement('div');
   speedoEl.style.cssText = 'position:fixed;left:50%;top:128px;transform:translateX(-50%);display:none;padding:8px 18px;border-radius:12px;background:rgba(10,14,20,.62);color:#fff;font:600 15px system-ui,sans-serif;letter-spacing:.3px;z-index:6;pointer-events:none;text-align:center';

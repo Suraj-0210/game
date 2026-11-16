@@ -30,6 +30,7 @@ function streetIndex(roads) {
 export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, shadows = true, lite = false, base = '/data/city/' }) {
   let index = null, T = 500;
   const tiles = new Map(), ready = [];             // key -> { state, group, chunks, cols, data }
+  const hooks = { add: null, remove: null };          // the traffic system learns which streets exist
   const mapRoads = [];                                // every street of the built tiles, for the minimap
   const remap = () => { mapRoads.length = 0; for (const t of tiles.values()) if (t.state === 'built') for (const r of t.mr) mapRoads.push(r); };
 
@@ -134,7 +135,7 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
     addC(fa, M.facade, shadows); addC(roofs, M.plain, shadows); addC(fur, M.plain, false); addC(heads, M.lamp, false);
     scene.add(group);
     const mr = roads.map((r) => { let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9; for (const p of r.pts) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); z0 = Math.min(z0, p[1]); z1 = Math.max(z1, p[1]); } return { w: r.cw || r.w, pts: r.pts, main: r.main, b: [x0, z0, x1, z1] }; });
-    return { group, chunks, cols, mr };
+    return { group, chunks, cols, mr, vr: roads.map((r) => ({ pts: r.pts, w: r.w, main: r.main, src: r })) };
   }
 
   function drop(t) {
@@ -143,7 +144,8 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
       t.group.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
     }
     for (const e of t.cols || []) e.off = true;      // colliders stay in their grid, switched off
-    t.group = null; t.chunks = []; t.cols = []; t.mr = []; t.state = 'gone'; remap();
+    if (hooks.remove && t.vr) hooks.remove(new Set(t.vr.map((q) => q.src)));
+    t.vr = null; t.group = null; t.chunks = []; t.cols = []; t.mr = []; t.state = 'gone'; remap();
   }
 
   // px,pz: the player; reach: how far (m) streets and buildings are drawn
@@ -170,7 +172,7 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
       ready.sort((a, b) => Math.hypot((a.ix + 0.5) * T - px, (a.iz + 0.5) * T - pz) - Math.hypot((b.ix + 0.5) * T - px, (b.iz + 0.5) * T - pz));
       const t = ready.shift();
       if (t.state === 'ready' && want.has(t.key)) {
-        const b = build(t, t.data); t.group = b.group; t.chunks = b.chunks; t.cols = b.cols; t.mr = b.mr; t.state = 'built'; remap();
+        const b = build(t, t.data); t.group = b.group; t.chunks = b.chunks; t.cols = b.cols; t.mr = b.mr; t.vr = b.vr; t.state = 'built'; remap(); if (hooks.add) hooks.add(t.vr);
         for (const e of t.cols) e.off = false;
       }
     }
@@ -184,5 +186,6 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
     frame++;
   }
   const stats = () => { let built = 0, tris = 0; for (const t of tiles.values()) if (t.state === 'built') built++; return { built, known: tiles.size }; };
-  return { init, update, stats, tiles, mapRoads, get index() { return index; } };
+  const setHooks = (h) => { hooks.add = h.add; hooks.remove = h.remove; if (hooks.add) for (const t of tiles.values()) if (t.state === 'built' && t.vr) hooks.add(t.vr); };
+  return { init, update, stats, tiles, mapRoads, setHooks, get index() { return index; } };
 }

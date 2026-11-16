@@ -20,23 +20,30 @@ const paintFor = (type, rnd) => { const l = PAINT_OF[type] || PAINTS; return l[M
 
 // roads: [{ pts: [[x,z],...], w, main }] in world coordinates
 export function prepareRoads(roads) {
-  const out = [], ends = new Map(), key = (x, z) => Math.floor(x / 20) + ',' + Math.floor(z / 20);
-  for (const r of roads) {
-    if (!r.pts || r.pts.length < 2 || r.w < 5) continue;
+  const out = [], ends = new Map(), bySrc = new Map(), key = (x, z) => Math.floor(x / 20) + ',' + Math.floor(z / 20);
+  let nextId = 0;
+  const prep = (r) => {
+    if (!r.pts || r.pts.length < 2 || r.w < 5) return null;
     const cum = [0]; let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
     for (let i = 0; i < r.pts.length; i++) {
       const p = r.pts[i]; x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); z0 = Math.min(z0, p[1]); z1 = Math.max(z1, p[1]);
       if (i) cum.push(cum[i - 1] + Math.hypot(p[0] - r.pts[i - 1][0], p[1] - r.pts[i - 1][1]));
     }
     const len = cum[cum.length - 1];
-    if (len < 25) continue;
+    if (len < 25) return null;
     const S = r.src || r;
-    out.push({ pts: r.pts, w: r.w, main: !!r.main, cum, len, n: r.pts.length, x0, x1, z0, z1, id: out.length, src: S, oneway: !!S.oneway, cw: S.cw || Math.max(3.2, r.w - 2), lanes: S.lanes || 1, med: S.med || 0, laneW: S.laneW || 3.3, stops: [] });
-  }
-  for (const r of out) for (const e of [0, 1]) { const p = r.pts[e ? r.n - 1 : 0], k = key(p[0], p[1]); if (!ends.has(k)) ends.set(k, []); ends.get(k).push({ r, end: e, x: p[0], z: p[1] }); }
+    return { pts: r.pts, w: r.w, main: !!r.main, cum, len, n: r.pts.length, x0, x1, z0, z1, id: nextId++, src: S, oneway: !!S.oneway, cw: S.cw || Math.max(3.2, r.w - 2), lanes: S.lanes || 1, med: S.med || 0, laneW: S.laneW || 3.3, stops: [] };
+  };
+  const link = (r) => { for (const e of [0, 1]) { const p = r.pts[e ? r.n - 1 : 0], k = key(p[0], p[1]); if (!ends.has(k)) ends.set(k, []); ends.get(k).push({ r, end: e, x: p[0], z: p[1] }); } };
+  const add = (list) => { for (const r of list) { const o = prep(r); if (!o) continue; out.push(o); link(o); bySrc.set(o.src, o); } };
   const near = (x, z, rad) => { const l = []; for (let cx = Math.floor((x - rad) / 20); cx <= Math.floor((x + rad) / 20); cx++) for (let cz = Math.floor((z - rad) / 20); cz <= Math.floor((z + rad) / 20); cz++) { const a = ends.get(cx + ',' + cz); if (a) for (const e of a) if (Math.hypot(e.x - x, e.z - z) <= rad) l.push(e); } return l; };
-  const bySrc = new Map(); for (const o of out) bySrc.set(o.src, o);
-  return { roads: out, near, bySrc };
+  add(roads);
+  // streets of the streamed city tiles come and go: take a set of their `src` objects out again
+  const remove = (srcs) => {
+    for (let i = out.length - 1; i >= 0; i--) if (srcs.has(out[i].src)) { bySrc.delete(out[i].src); out.splice(i, 1); }
+    for (const [k, l] of ends) { const f = l.filter((e) => !srcs.has(e.r.src)); if (f.length) ends.set(k, f); else ends.delete(k); }
+  };
+  return { roads: out, near, bySrc, add, remove };
 }
 // point and direction on a road at arc length s
 function locate(r, s, hint) { let i = Math.min(hint | 0, r.n - 2); while (i > 0 && r.cum[i] > s) i--; while (i < r.n - 2 && r.cum[i + 1] < s) i++; return i; }
@@ -148,7 +155,7 @@ export function createVehicles({ THREE, kit, scene, roads, blocked, ground, inWo
     // keep about `target` vehicles around the player
     spawnT -= dt;
     if (!filled) { for (let i = 0; i < target; i++) { const a = newAgent(px, pz, 30, 300); if (a) traffic.push(a); } filled = true; }
-    else if (spawnT <= 0 && traffic.length < target) { spawnT = 0.35; const a = newAgent(px, pz, 140, 300); if (a) traffic.push(a); }
+    else if (spawnT <= 0 && traffic.length < target) { spawnT = traffic.length < target * 0.5 ? 0.12 : 0.35; const a = newAgent(px, pz, 140, 300); if (a) traffic.push(a); }
     for (let n = traffic.length - 1; n >= 0; n--) {
       const a = traffic[n], r = a.r, m = model(a.type);
       if (Math.hypot(a.x - px, a.z - pz) > 360) { dropAgent(a); continue; }
@@ -382,11 +389,16 @@ export function createVehicles({ THREE, kit, scene, roads, blocked, ground, inWo
     }
     return false;
   }
+  function addRoads(list) { world.add(list); }
+  function removeRoads(srcs) {
+    world.remove(srcs);
+    for (let n = traffic.length - 1; n >= 0; n--) if (srcs.has(traffic[n].r.src)) dropAgent(traffic[n]);
+  }
   function setSignals(list) {
     for (const sg of list) for (const arm of sg.arms) { const pr = world.bySrc.get(arm.road); if (pr) pr.stops.push({ s: arm.s - arm.mv * arm.clr, mv: arm.mv, sg, group: arm.group }); }
   }
   return {
-    setSignals, parked, traffic, fleets, world, seedParked, enter, exit, drive, update, nearestParked, solid, toggleLights, makeRemote, animateRemote, disposeRemote,
+    setSignals, addRoads, removeRoads, parked, traffic, fleets, world, seedParked, enter, exit, drive, update, nearestParked, solid, toggleLights, makeRemote, animateRemote, disposeRemote,
     get cur() { return cur; }, get lightsOn() { return lightsOn; }, flush,
   };
 }
