@@ -386,7 +386,7 @@ function updateCoords() {
   const x = player.x, z = player.z, a = CITY ? areaAt(x, z) : ZONE, name = a ? ZONE_BY_ID[a].name : 'Road between areas';
   const o = a && CITY ? LAYOUT[a] : [0, 0], lx = x - o[0], lz = z - o[1];
   const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'], fy = driving() ? veh.cur.yaw : player.yaw;
-  const hd = dirs[((Math.round((Math.atan2(-Math.sin(fy), -Math.cos(fy)) / Math.PI) * 4) % 8) + 8) % 8];   // forward is (-sin yaw, -cos yaw), north is -z
+  const hd = dirs[((Math.round((Math.atan2(-Math.sin(fy), Math.cos(fy)) / Math.PI) * 4) % 8) + 8) % 8];   // forward is (-sin yaw, -cos yaw), north is -z
   const rd = a && plan.nearestRoad ? '' : '';
   lastCoordText = `${name} | local x ${lx.toFixed(0)}, z ${lz.toFixed(0)} | world x ${x.toFixed(0)}, z ${z.toFixed(0)} | y ${player.y.toFixed(1)} | facing ${hd}${rd}`;
   coordEl.innerHTML = `<div>${name}</div><div>local&nbsp; x ${lx.toFixed(0)}&nbsp; z ${lz.toFixed(0)}</div><div>world&nbsp; x ${x.toFixed(0)}&nbsp; z ${z.toFixed(0)}</div><div>height ${player.y.toFixed(1)} · facing ${hd}</div>`;

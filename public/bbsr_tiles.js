@@ -30,6 +30,9 @@ function streetIndex(roads) {
 export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, shadows = true, lite = false, base = '/data/city/' }) {
   let index = null, T = 500;
   const tiles = new Map(), ready = [];             // key -> { state, group, chunks, cols, data }
+  const lm = (c, extra = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.9, metalness: 0, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -0.5, polygonOffsetUnits: -0.5, ...extra });
+  const LM = { water: lm(0x4c86a6, { roughness: 0.22, metalness: 0.12 }), park: lm(0x6aa04a), forest: lm(0x4a7d38), field: lm(0xb8ab6c), pitch: lm(0x7bb25c), apron: lm(0x8d8d88), taxiway: lm(0x4a4a4c), runway: lm(0x39393b) };
+  const LY = { field: 0.006, forest: 0.008, park: 0.009, pitch: 0.011, water: 0.013, apron: 0.013, taxiway: 0.015, runway: 0.017 };
   const hooks = { add: null, remove: null };          // the traffic system learns which streets exist
   const mapRoads = [];                                // every street of the built tiles, for the minimap
   const remap = () => { mapRoads.length = 0; for (const t of tiles.values()) if (t.state === 'built') for (const r of t.mr) mapRoads.push(r); };
@@ -127,6 +130,33 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
       }
     }
     for (const l of stub.lamps) { fur.box(l.x, l.z, 0, 0.16, 4.8, 0.16, 0, 0x3a3f44, { us: 2, vs: 2 }); heads.box(l.x, l.z, 4.8, 0.55, 0.22, 0.55, 0, 0xffffff, { us: 2, vs: 2 }); }
+    // ---- water, green land, the airport (flat on the ground, under the streets) ----
+    if (data.land && data.land.length) {
+      const buf = {};
+      const push = (k, ax, az, bx, bz, cx, cz) => { const y = LY[k]; (buf[k] || (buf[k] = [])).push(ax, y, az, bx, y, bz, cx, y, cz); };
+      for (const L of data.land) {
+        if (L.line) {
+          const P = L.pts, hw = L.w / 2; if (P.length < 2) continue;
+          const nrm = P.map((p, i) => { const a = P[Math.max(0, i - 1)], b = P[Math.min(P.length - 1, i + 1)], dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz) || 1; return [-dz / l, dx / l]; });
+          for (let i = 0; i + 1 < P.length; i++) {
+            const a = P[i], b = P[i + 1], na = nrm[i], nb = nrm[i + 1];
+            const a0 = [a[0] + na[0] * hw, a[1] + na[1] * hw], a1 = [a[0] - na[0] * hw, a[1] - na[1] * hw], b0 = [b[0] + nb[0] * hw, b[1] + nb[1] * hw], b1 = [b[0] - nb[0] * hw, b[1] - nb[1] * hw];
+            push(L.k, a0[0], a0[1], b0[0], b0[1], b1[0], b1[1]); push(L.k, a0[0], a0[1], b1[0], b1[1], a1[0], a1[1]);
+          }
+        } else {
+          const V = L.pts.map((p) => new THREE.Vector2(p[0], p[1])); let tri;
+          try { tri = THREE.ShapeUtils.triangulateShape(V, []); } catch (e) { continue; }
+          for (const [i, j, k] of tri) push(L.k, V[i].x, V[i].y, V[j].x, V[j].y, V[k].x, V[k].y);
+        }
+      }
+      for (const k in buf) {
+        const g = new THREE.BufferGeometry(), n = buf[k].length / 3, nr = new Float32Array(n * 3);
+        for (let q = 0; q < n; q++) nr[q * 3 + 1] = 1;
+        g.setAttribute('position', new THREE.Float32BufferAttribute(buf[k], 3)); g.setAttribute('normal', new THREE.BufferAttribute(nr, 3));
+        const m = new THREE.Mesh(g, LM[k]); m.receiveShadow = shadows; group.add(m);
+        chunks.push({ mesh: m, x: (t.ix + 0.5) * T, z: (t.iz + 0.5) * T, always: true });
+      }
+    }
     if (treeGeos.length) {
       const g = mergeGeometries(treeGeos, false), m = new THREE.Mesh(g, M.plain); m.castShadow = false; group.add(m);
       for (const q of treeGeos) q.dispose();
