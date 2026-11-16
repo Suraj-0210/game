@@ -140,8 +140,7 @@ export function buildPlan(osm = null) {
   const gx = x1, gz = C.cz;
   plan.gate = { x: gx, z: gz, w: GATE_W };
   for (const s of [-1, 1]) plan.boxes.push({ x: gx, z: gz + s * (gapW + 2.5), hw: 3.2, hd: 2.5, theta: 0, y0: 0, y1: 10 });
-  plan.pave.push({ x0: x0 + 2, z0: z0 + 2, x1: x1 - 2, z1: z1 - 2 }, { x0: x1, z0: gz - 12, x1: x1 + 62, z1: gz + 12 });
-  plan.pave.push({ x0: 35, z0: 140, x1: 95, z1: 230 });              // plaza outside the gate
+  plan.pave.push({ x0: x0 + 2, z0: z0 + 2, x1: x1 - 2, z1: z1 - 2 }, { x0: x1, z0: gz - 8, x1: x1 + 14, z1: gz + 8 });   // just the gate apron: the real streets run past the gate, so no invented plaza under them
 
   // main temple buildings, west to east along the axis (z = tower centre): sanctum tower, porch, dance hall, offering hall
   const ax = LINGARAJ.x, az = LINGARAJ.z;
