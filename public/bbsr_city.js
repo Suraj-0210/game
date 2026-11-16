@@ -13,24 +13,20 @@ export const PITCH = TILE + GAP;
 // flyover road, come Jaydev Vihar, Vani Vihar (Utkal University) and Rasulgarh from west to east, Baramunda and Khandagiri further
 // west, and Patia / KIIT far to the north. Real straight-line distances from the Old Town: Baramunda 5.5 km, Khandagiri 5.8 km,
 // Jaydev Vihar 6.2 km, Vani Vihar 6.5 km, Rasulgarh 7 km, Patia 10.8 km. Here they are squeezed to about 1.3 km per step.
-export const LAYOUT = {
+export const LAYOUT = {                // TRUE positions in metres from the Old Town (x east, z south), from OpenStreetMap
   oldtown: [0, 0],
-  vanivihar: [0, -PITCH],           // Janpath and Sachivalaya Marg run north from the Old Town to Vani Vihar
-  jaydev: [-PITCH, -PITCH],         // west of Vani Vihar along the NH-16 flyovers
-  rasulgarh: [PITCH, -PITCH],       // east of Vani Vihar, where NH-16 crosses at the Rasulgarh flyover
-  baramunda: [-2 * PITCH, -PITCH],  // the big bus stand, further west
-  khandagiri: [-2 * PITCH, 0],      // south of Baramunda, at the foot of the Khandagiri and Udayagiri hills
-  patia: [-PITCH, -2 * PITCH],      // north of Jaydev Vihar: Patia, Infocity and KIIT
+  khandagiri: [-5150, -2650],
+  baramunda: [-4300, -3700],
+  jaydev: [-990, -6115],
+  vanivihar: [800, -6560],
+  rasulgarh: [2551, -6279],
+  patia: [-2300, -10650],
 };
-export const LINKS = [
-  ['oldtown', 'vanivihar'], ['vanivihar', 'jaydev'], ['vanivihar', 'rasulgarh'], ['jaydev', 'baramunda'], ['baramunda', 'khandagiri'], ['jaydev', 'patia'],
-];
+export const LINKS = [];               // no made-up connector roads any more: the real streets of the city tiles join the areas
+// The whole mapped city (the BBBike extract): every street and building outside the seven areas streams in from public/data/city/ (bbsr_tiles.js)
+export const CITY_BOX = { x0: -11312, x1: 15427, z0: -13048, z1: 6524 };
 const MARGIN = 160;
-export const BOUNDS = (() => {
-  let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
-  for (const [x, z] of Object.values(LAYOUT)) { x0 = Math.min(x0, x - HALF_TILE); x1 = Math.max(x1, x + HALF_TILE); z0 = Math.min(z0, z - HALF_TILE); z1 = Math.max(z1, z + HALF_TILE); }
-  return { x0: x0 - MARGIN, x1: x1 + MARGIN, z0: z0 - MARGIN, z1: z1 + MARGIN };
-})();
+export const BOUNDS = { x0: CITY_BOX.x0, x1: CITY_BOX.x1, z0: CITY_BOX.z0, z1: CITY_BOX.z1 };
 export const inBounds = (x, z) => x > BOUNDS.x0 && x < BOUNDS.x1 && z > BOUNDS.z0 && z < BOUNDS.z1;
 
 // Which area is this point in (or null on the roads between them)?

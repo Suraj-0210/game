@@ -528,7 +528,7 @@ function realBuild(plan, H, id, real) {
     return best;
   };
   const stubs = [], exits = edgeExits(plan);
-  for (const [mx, mz, side] of [[0, -EDGE, 'n'], [0, EDGE, 's'], [-EDGE, 0, 'w'], [EDGE, 0, 'e']]) {
+  for (const [mx, mz, side] of []) {   // (the made-up connector stubs are gone: real streets of the city tiles now reach every edge)
     if (exits[side].some((q) => Math.hypot(q.x - mx, q.z - mz) < 130)) continue;     // a real main road already leaves near the middle of this edge
     const np = nearestPoint(mx, mz);
     if (np && np.d > 6) { H.road('Connector', 15, true, [[mx, mz], [np.x, np.z]]); stubs.push([mx, mz, np.x, np.z]); }

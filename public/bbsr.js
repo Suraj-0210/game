@@ -9,6 +9,7 @@ import { createMissions, spotsFromPlan, ITEMS, SPOT_LABELS, QUEST_LIST, isNight 
 import { buildCity } from './bbsr_mesh.js';
 import { ZONES, ZONE_BY_ID, zoneId, zoneRoom, buildZonePlan } from './bbsr_zones.js';
 import { buildZoneExtras } from './bbsr_zone_mesh.js';
+import { createTiles } from './bbsr_tiles.js';
 import { LAYOUT, BOUNDS, inBounds, areaAt, distToArea, offsetPlan, buildConnectors, edgeExits, computeLinks } from './bbsr_city.js';
 import { makeCityTextures } from './bbsr_tex.js';
 import { makeTextures } from './textures.js';
@@ -127,6 +128,7 @@ function addBoxCollider(b) {
       if (!a) boxes.set(k, (a = []));
       a.push(e);
     }
+  return e;
 }
 // Is a body (feet at py, 1.8 m tall, horizontal radius pr) touching anything solid at x,z?
 function blocked(x, z, pr, py) {
@@ -1025,6 +1027,7 @@ function frame(now) {
       if (g.userData.chunks) for (const c of g.userData.chunks) if (!c.always) c.mesh.visible = Math.hypot(c.x + pt.ox - px, c.z + pt.oz - pz) < reach + 100;
     }
     for (const c of connChunks) c.mesh.visible = Math.hypot(c.x - px, c.z - pz) < reach + 100;
+    if (cityTiles) cityTiles.update(px, pz, reach);
     const a = areaAt(px, pz);
     if (a && a !== lastArea) { if (lastArea !== null || !welcomed) hud.toast(ZONE_BY_ID[a].name, 2600); lastArea = a; welcomed = true; }
     else if (!a) lastArea = null;
@@ -1058,7 +1061,8 @@ async function buildCityWorld(osm) {
   const g = new THREE.PlaneGeometry(W, D).rotateX(-Math.PI / 2), uv = g.attributes.uv;
   for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (W / 8), uv.getY(i) * (D / 8));
   const gnd = new THREE.Mesh(g, M0.ground); gnd.position.set((BOUNDS.x0 + BOUNDS.x1) / 2, -0.02, (BOUNDS.z0 + BOUNDS.z1) / 2); gnd.receiveShadow = true; scene.add(gnd);
-  const conn = buildConnectors(THREE, M0, computeLinks(parts)); scene.add(conn.group);
+  cityTiles = createTiles({ THREE, M: M0, scene, addBoxCollider, shadows: !LITE }); await cityTiles.init();   // every other street and building of the city streams in around you
+  const conn = { group: new THREE.Group(), links: cityTiles.mapRoads, roads: [], chunks: [] };
   parts.forEach((pt) => offsetPlan(pt.plan, pt.ox, pt.oz));      // gameplay data moves into world coordinates (meshes already sit in place)
   const cat = (k) => parts.flatMap((pt) => pt.plan[k] || []), old = parts[0].plan;
   const hz = parts.filter((pt) => pt.plan.height);
@@ -1072,7 +1076,7 @@ async function buildCityWorld(osm) {
   town = towns[0];
   cityLinks = conn.links; cityRoads = conn.roads; connChunks = conn.chunks;
 }
-let cityLinks = [], cityRoads = [], connChunks = [];
+let cityLinks = [], cityRoads = [], connChunks = [], cityTiles = null;
 async function boot() {
   statusEl.textContent = 'Surveying Old Town...'; await nextFrame();
   let osm = null;   // real OpenStreetMap streets and buildings, if tools/fetch_osm.mjs has been run
@@ -1105,6 +1109,6 @@ async function boot() {
   statusEl.textContent = 'Connecting to server...'; await nextFrame();
   connect();
 }
-window.__vw = { get veh() { return veh; }, enterCar, leaveCar, driving, scene, camera, renderer, player, keys, hud, voice, setDoorOpen, doorOpen, get indoors() { return indoors; }, npcs, wx, setWeather: (m) => { weatherMode = m; wxInit = false; }, setWind: (v) => { windOverride = v; }, get vegetation() { return vegetation; }, get plan() { return plan; }, ground, blocked, setEmote, interact, get nearest() { return nearest; }, get missions() { return missions; }, ZONE, CITY, parts, areaAt, openTravel, travelTo, get travelOpen() { return travelOpen; }, get ts() { return ts; }, get hour() { return curHour; }, setTime: (h) => { todOverride = h; }, showLines, checkSpots, get glow() { return glow; }, get beacon() { return beacon; }, toggleJournal };
+window.__vw = { get tiles() { return cityTiles; }, get veh() { return veh; }, enterCar, leaveCar, driving, scene, camera, renderer, player, keys, hud, voice, setDoorOpen, doorOpen, get indoors() { return indoors; }, npcs, wx, setWeather: (m) => { weatherMode = m; wxInit = false; }, setWind: (v) => { windOverride = v; }, get vegetation() { return vegetation; }, get plan() { return plan; }, ground, blocked, setEmote, interact, get nearest() { return nearest; }, get missions() { return missions; }, ZONE, CITY, parts, areaAt, openTravel, travelTo, get travelOpen() { return travelOpen; }, get ts() { return ts; }, get hour() { return curHour; }, setTime: (h) => { todOverride = h; }, showLines, checkSpots, get glow() { return glow; }, get beacon() { return beacon; }, toggleJournal };
 requestAnimationFrame(frame);
 boot().catch((e) => { statusEl.textContent = 'Error: ' + e.message; console.error(e); });

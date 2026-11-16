@@ -161,7 +161,7 @@ export function buildRoads(ctx, roads, M, plan) {
   const inside = (x, z, self, pad) => {
     const l = grid.get(gk(x, z)); if (!l) return false;
     for (const s of l) {
-      if (s.r === self) continue;
+      if (s.r === self || (self && self.grp && s.r.grp === self.grp)) continue;     // pieces of one street (cut at a tile edge) are not junctions
       const dx = s.bx - s.ax, dz = s.bz - s.az, l2 = dx * dx + dz * dz || 1, t = Math.max(0, Math.min(1, ((x - s.ax) * dx + (z - s.az) * dz) / l2));
       if (hyp(x - (s.ax + dx * t), z - (s.az + dz * t)) < s.hw + pad) return true;
     }
@@ -246,7 +246,7 @@ export function buildRoads(ctx, roads, M, plan) {
       wall('plain', P.v, hw, 0.03, 0.2, 0xb4b2a9, r, 0.1);
       if (m >= 1.4) ribbon('plain', P.v, hw + 0.3, hw + m - 0.1, 0.215, 0x56803c, r, { pad: 0.1 });
       if (m >= 1.2) for (let s = 3; s < P.len - 2; s += 6) { const p = pathAt(P, s), q = hw + m * 0.55; if (inside(p.x + p.rx * q, p.z + p.rz * q, r, 1.5)) continue; const B = ch.get('plain', p.x, p.z), sz = m >= 2.4 ? 0.9 : 0.6; B.box(p.x + p.rx * q, p.z + p.rz * q, 0.2, sz, 0.5 + ((s * 7) % 3) * 0.1, sz, 0, (s * 3) % 2 ? 0x3f6b32 : 0x4c7a38, { us: 2, vs: 2 }); }
-      if (plan && plan.lamps) for (let s = 22; s < P.len - 12; s += 38) { const p = pathAt(P, s), q = hw + m * 0.5; const x = p.x + p.rx * q, z = p.z + p.rz * q; if (!inside(x, z, r, 2.5) && !(plan.rounds || []).some((u) => hyp(x - u.x, z - u.z) < u.R + 6) && Math.abs(x) < 438 && Math.abs(z) < 438) plan.lamps.push({ x, z, med: 1 }); }
+      if (plan && plan.lamps) for (let s = 22; s < P.len - 12; s += 38) { const p = pathAt(P, s), q = hw + m * 0.5; const x = p.x + p.rx * q, z = p.z + p.rz * q; if (!inside(x, z, r, 2.5) && !(plan.rounds || []).some((u) => hyp(x - u.x, z - u.z) < u.R + 6) && (plan.worldCoords || (Math.abs(x) < 438 && Math.abs(z) < 438))) plan.lamps.push({ x, z, med: 1 }); }
     }
     if (r.oneway) {
       solid(P, -edge, WHITE, 0.14, r); solid(P, edge, WHITE, 0.14, r);
@@ -267,7 +267,7 @@ export function buildRoads(ctx, roads, M, plan) {
         for (let k = 1; k < r.lanes; k++) dashes(P, side * (m + k * r.laneW), 3, 6, WHITE, 0.12, r);
       }
       // street lights stand in the median
-      if (plan && plan.lamps) for (let s = 18; s < P.len - 12; s += 34) { const p = pathAt(P, s); if (!inside(p.x, p.z, r, 2.5) && !(plan.rounds || []).some((q) => hyp(p.x - q.x, p.z - q.z) < q.R + 6) && Math.abs(p.x) < 438 && Math.abs(p.z) < 438) plan.lamps.push({ x: p.x, z: p.z, med: 1 }); }
+      if (plan && plan.lamps) for (let s = 18; s < P.len - 12; s += 34) { const p = pathAt(P, s); if (!inside(p.x, p.z, r, 2.5) && !(plan.rounds || []).some((q) => hyp(p.x - q.x, p.z - q.z) < q.R + 6) && (plan.worldCoords || (Math.abs(p.x) < 438 && Math.abs(p.z) < 438))) plan.lamps.push({ x: p.x, z: p.z, med: 1 }); }
     } else if (r.lanes >= 2) {
       solid(P, -0.12, YELLOW, 0.1, r); solid(P, 0.12, YELLOW, 0.1, r);
       solid(P, -edge, WHITE, 0.14, r); solid(P, edge, WHITE, 0.14, r);
@@ -366,6 +366,7 @@ const distToPath = (r, x, z) => {
 // Where the big roads meet: a signal with its stop lines. Real signal positions (OpenStreetMap highway=traffic_signals) are used when
 // the map has them; otherwise the busiest junctions of main roads get one.
 export function planSignals(roads, plan, opts = {}) {
+  if (plan && plan.noSignals) return [];
   const max = opts.max || 12, edge = opts.edge || 470;
   const cand = roads.filter((r) => r.main && r.cw >= 5.2 && !r.round && r.name !== 'Connector' && !/ring$/i.test(r.name || '') && !/_link$/.test(r.kind || ''));
   const side = roads.filter((r) => !r.main && r.cw >= 5 && r.cw < 9 && !/^(service|pedestrian)$/.test(r.kind || '') && r.name !== 'Connector');

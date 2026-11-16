@@ -135,7 +135,8 @@ export function createHUD({ isTouch, onEmote, onInteract, onChatSubmit }) {
     if (tiles) {
       ctx.lineCap = 'butt'; ctx.strokeStyle = '#7c7a76';
       ctx.lineJoin = 'round';
-      for (const r of cityRoads) { ctx.lineWidth = Math.max(2, r.w * scale); ctx.beginPath(); r.pts.forEach(([x, z], i) => (i ? ctx.lineTo((x - ox) * scale, (z - oz) * scale) : ctx.moveTo((x - ox) * scale, (z - oz) * scale))); ctx.stroke(); }
+      const vx0 = ox - 40, vx1 = ox + px / scale + 40, vz0 = oz - 40, vz1 = oz + px / scale + 40;
+      for (const r of cityRoads) { if (r.b && (r.b[2] < vx0 || r.b[0] > vx1 || r.b[3] < vz0 || r.b[1] > vz1)) continue; ctx.lineWidth = Math.max(2, r.w * scale); ctx.beginPath(); r.pts.forEach(([x, z], i) => (i ? ctx.lineTo((x - ox) * scale, (z - oz) * scale) : ctx.moveTo((x - ox) * scale, (z - oz) * scale))); ctx.stroke(); }
       for (const t of tiles) {
         const dx = (t.ox - 500 - ox) * scale, dy = (t.oz - 500 - oz) * scale, sz = 1000 * scale;
         if (dx > px || dy > px || dx + sz < 0 || dy + sz < 0) continue;
