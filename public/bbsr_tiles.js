@@ -4,6 +4,7 @@
 import { Batch } from './bbsr_mesh.js';
 import { finishRoad, pairDual, buildRoads } from './bbsr_roads.js';
 import { LAYOUT, HALF_TILE } from './bbsr_city.js';
+import { slab } from './bbsr_zone_mesh.js';
 
 const PAL = [0xf4f0e6, 0xf4f0e6, 0xf2dfa0, 0xe8c27e, 0xf0b8b0, 0xb8dcc0, 0xa8c8e0, 0xd89070, 0xe9e2d2, 0xf7d3a0];
 const FLOORS = [1, 2, 2, 2, 3, 3, 3, 4], FILLER = [1, 2, 2, 2, 3, 3, 4], SHOPF = [2, 3, 3, 4, 4, 5, 6];
@@ -27,7 +28,7 @@ function streetIndex(roads) {
   };
 }
 
-export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, shadows = true, lite = false, base = '/data/city/' }) {
+export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, flyovers = () => [], shadows = true, lite = false, base = '/data/city/' }) {
   let index = null, T = 500;
   const tiles = new Map(), ready = [];             // key -> { state, group, chunks, cols, data }
   const lm = (c, extra = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.9, metalness: 0, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -0.5, polygonOffsetUnits: -0.5, ...extra });
@@ -137,6 +138,37 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
       let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9; for (const q of L.pts) { x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); z0 = Math.min(z0, q[1]); z1 = Math.max(z1, q[1]); }
       const hw = L.line ? L.w * 0.4 : 0; water.push({ line: !!L.line, hw, pts: L.pts, b: [x0 - hw, z0 - hw, x1 + hw, z1 + hw] });
     }
+    // ---- flyovers and bridges: a raised deck you can drive and walk over (ground() in bbsr.js reads plan.flyovers), with piers and parapets ----
+    const fos = [];
+    if (data.fly && data.fly.length) {
+      const deck = new Batch(THREE), piers = new Batch(THREE), marks = new Batch(THREE);
+      for (const d of data.fly) {
+        const L = Math.hypot(d.x1 - d.x0, d.z1 - d.z0); if (L < 3) continue;
+        const dx = (d.x1 - d.x0) / L, dz = (d.z1 - d.z0) / L, yaw = Math.atan2(-dz, dx), ramp = Math.min(65, d.tot * 0.3), w = Math.max(7, d.w - 3), h = 7.5;
+        const f = { x0: d.x0, z0: d.z0, x1: d.x1, z1: d.z1, w, h, ramp, L, dx, dz, yaw, off: d.off, tot: d.tot, piers: [] };
+        const hAt = (s) => { const g = f.off + s; return g < ramp ? (h * g) / ramp : f.tot - g < ramp ? (h * (f.tot - g)) / ramp : h; };
+        const px = -dz, pz = dx;
+        for (let s = 0; s < L; s += 5) {
+          const e = Math.min(L, s + 5), ya = hAt(s), yb = hAt(e), ax = f.x0 + dx * s, az = f.z0 + dz * s, bx = f.x0 + dx * e, bz = f.z0 + dz * e;
+          slab(deck, ax, az, ya, bx, bz, yb, w, 1.0, 0xb9b5ab);
+          for (const sd of [-1, 1]) slab(deck, ax + px * (w / 2 - 0.2) * sd, az + pz * (w / 2 - 0.2) * sd, ya + 1.0, bx + px * (w / 2 - 0.2) * sd, bz + pz * (w / 2 - 0.2) * sd, yb + 1.0, 0.4, 1.0, 0xa7a399);
+          if (Math.floor(s / 5) % 2 === 0) slab(marks, ax, az, ya + 0.02, bx, bz, yb + 0.02, 0.18, 0.02, 0xf2f2f2);
+        }
+        for (let s = 2; s < L; s += 4) {                                        // solid underside and parapets, as in the areas
+          const y = hAt(s);
+          cols.push(addBoxCollider({ x: f.x0 + dx * s, z: f.z0 + dz * s, hw: 2.1, hd: w / 2 + 0.3, theta: yaw, y0: y - 1.0, y1: y - 0.7 }));
+          if (y > 0.3) for (const sd of [-1, 1]) cols.push(addBoxCollider({ x: f.x0 + dx * s - dz * sd * (w / 2 + 0.15), z: f.z0 + dz * s + dx * sd * (w / 2 + 0.15), hw: 2.1, hd: 0.2, theta: yaw, y0: y - 0.2, y1: y + 1.1 }));
+        }
+        for (let s = 14; s < L - 8; s += 18) {
+          const y = hAt(s); if (y < 2.6) continue;
+          piers.box(f.x0 + dx * s, f.z0 + dz * s, 0, 1.5, y - 0.9, 1.5, yaw, 0xa9a69c); piers.box(f.x0 + dx * s, f.z0 + dz * s, y - 1.4, w * 0.8, 0.7, 2.0, yaw + Math.PI / 2, 0xa0a096);
+          cols.push(addBoxCollider({ x: f.x0 + dx * s, z: f.z0 + dz * s, hw: 0.9, hd: 0.9, theta: 0, y0: 0, y1: y - 0.8 }));
+        }
+        fos.push(f);
+      }
+      addC(deck, M.plain, shadows); addC(piers, M.plain, shadows); addC(marks, M.plain, false);
+      const list = flyovers(); for (const f of fos) list.push(f);
+    }
     // ---- water, green land, the airport (flat on the ground, under the streets) ----
     if (data.land && data.land.length) {
       const buf = {};
@@ -172,7 +204,7 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
     addC(fa, M.facade, shadows); addC(roofs, M.plain, shadows); addC(fur, M.plain, false); addC(heads, M.lamp, false);
     scene.add(group);
     const mr = roads.map((r) => { let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9; for (const p of r.pts) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); z0 = Math.min(z0, p[1]); z1 = Math.max(z1, p[1]); } return { w: r.cw || r.w, pts: r.pts, main: r.main, b: [x0, z0, x1, z1] }; });
-    return { water, group, chunks, cols, mr, vr: roads.map((r) => ({ pts: r.pts, w: r.w, main: r.main, src: r })) };
+    return { fos, water, group, chunks, cols, mr, vr: roads.map((r) => ({ pts: r.pts, w: r.w, main: r.main, src: r })) };
   }
 
   function drop(t) {
@@ -182,7 +214,8 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
     }
     for (const e of t.cols || []) e.off = true;      // colliders stay in their grid, switched off
     if (hooks.remove && t.vr) hooks.remove(new Set(t.vr.map((q) => q.src)));
-    t.water = []; t.vr = null; t.group = null; t.chunks = []; t.cols = []; t.mr = []; t.state = 'gone'; remap();
+    if (t.fos && t.fos.length) { const list = flyovers(), set = new Set(t.fos); for (let i = list.length - 1; i >= 0; i--) if (set.has(list[i])) list.splice(i, 1); }
+    t.fos = []; t.water = []; t.vr = null; t.group = null; t.chunks = []; t.cols = []; t.mr = []; t.state = 'gone'; remap();
   }
 
   // px,pz: the player; reach: how far (m) streets and buildings are drawn
@@ -198,7 +231,7 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
       if (Math.hypot(dx, dz) > reach + 80) continue;
       want.add(key);
       let t = tiles.get(key);
-      if (!t) { t = { key, ix, iz, state: 'new', group: null, chunks: [], cols: [], mr: [], water: [], data: null }; tiles.set(key, t); }
+      if (!t) { t = { key, ix, iz, state: 'new', group: null, chunks: [], cols: [], mr: [], water: [], fos: [], data: null }; tiles.set(key, t); }
       if (t.state === 'new' || t.state === 'gone') {
         if (t.data) { t.state = 'ready'; ready.push(t); }
         else { t.state = 'loading'; fetch(`${base}t_${ix}_${iz}.json`).then((r) => r.json()).then((d) => { t.data = d; t.state = 'ready'; ready.push(t); }).catch(() => { t.state = 'failed'; }); }
@@ -209,7 +242,7 @@ export function createTiles({ THREE, mergeGeometries, M, scene, addBoxCollider, 
       ready.sort((a, b) => Math.hypot((a.ix + 0.5) * T - px, (a.iz + 0.5) * T - pz) - Math.hypot((b.ix + 0.5) * T - px, (b.iz + 0.5) * T - pz));
       const t = ready.shift();
       if (t.state === 'ready' && want.has(t.key)) {
-        const b = build(t, t.data); t.group = b.group; t.chunks = b.chunks; t.cols = b.cols; t.mr = b.mr; t.vr = b.vr; t.water = b.water; t.state = 'built'; remap(); if (hooks.add) hooks.add(t.vr);
+        const b = build(t, t.data); t.group = b.group; t.chunks = b.chunks; t.cols = b.cols; t.mr = b.mr; t.vr = b.vr; t.water = b.water; t.fos = b.fos; t.state = 'built'; remap(); if (hooks.add) hooks.add(t.vr);
         for (const e of t.cols) e.off = false;
       }
     }

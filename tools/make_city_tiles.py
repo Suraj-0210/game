@@ -93,7 +93,7 @@ def main(path):
     x0, x1, z0, z1 = min(x0, x1), max(x0, x1), min(z0, z1), max(z0, z1)
     print('city box x', round(x0), round(x1), 'z', round(z0), round(z1))
     inbox = lambda p: x0 <= p[0] <= x1 and z0 <= p[1] <= z1
-    roads, builds = [], []
+    roads, builds, flies = [], [], []
     for wid, t, refs in ways:
         pts = [nodes[n] for n in refs if n in nodes]
         if len(pts) < 2: continue
@@ -105,6 +105,15 @@ def main(path):
                 if math.hypot(p[0] - simp[-1][0], p[1] - simp[-1][1]) >= 4: simp.append(p)
             if len(simp) < 2: simp.append(pts[-1])
             elev = t.get('bridge') in ('yes', 'viaduct') and t.get('layer', '0') not in ('0', '-1', '-2')
+            if elev:
+                tot = sum(math.hypot(simp[i + 1][0] - simp[i][0], simp[i + 1][1] - simp[i][1]) for i in range(len(simp) - 1))
+                if tot >= 60 and hw in MAIN:
+                    off = 0.0
+                    for i in range(len(simp) - 1):
+                        a_, b_ = simp[i], simp[i + 1]; L = math.hypot(b_[0] - a_[0], b_[1] - a_[1])
+                        if L >= 3: flies.append({'x0': round(a_[0], 1), 'z0': round(a_[1], 1), 'x1': round(b_[0], 1), 'z1': round(b_[1], 1), 'w': ROAD_W[hw], 'off': round(off, 1), 'tot': round(tot, 1)})
+                        off += L
+                    continue
             rd = {'g': wid, 'kind': hw, 'w': ROAD_W[hw], 'pts': simp, 'elev': elev}
             if hw in MAIN: rd['main'] = 1
             ow = t.get('oneway')
@@ -183,6 +192,10 @@ def main(path):
                     o['pts'] = [[round(p[0], 1), round(p[1], 1)] for p in run]
                     tiles[(ix, iz)]['roads'].append(o)
     for b in builds: tiles[(math.floor(b[0] / T), math.floor(b[1] / T))]['b'].append(b)
+    for f in flies:                                      # a bridge piece belongs to the tile of its middle; the areas have their own flyovers
+        mx, mz = (f['x0'] + f['x1']) / 2, (f['z0'] + f['z1']) / 2
+        if inside_sq(mx, mz): continue
+        tiles[(math.floor(mx / T), math.floor(mz / T))].setdefault('fly', []).append(f)
     for L in land:
         xs = [p[0] for p in L['pts']]; zs = [p[1] for p in L['pts']]; hw = L.get('w', 0) / 2
         cells = [(ix, iz) for ix in range(math.floor((min(xs) - hw) / T), math.floor((max(xs) + hw) / T) + 1) for iz in range(math.floor((min(zs) - hw) / T), math.floor((max(zs) + hw) / T) + 1)]
@@ -197,7 +210,7 @@ def main(path):
     for fn in os.listdir(out): os.remove(os.path.join(out, fn))
     index, total = {}, 0
     for (ix, iz), d in sorted(tiles.items()):
-        if not d['roads'] and not d['b'] and not d.get('land'): continue
+        if not d['roads'] and not d['b'] and not d.get('land') and not d.get('fly'): continue
         fn = f't_{ix}_{iz}.json'; json.dump(d, open(os.path.join(out, fn), 'w'), separators=(',', ':'))
         sz = os.path.getsize(os.path.join(out, fn)); total += sz; index[f'{ix},{iz}'] = [len(d['roads']), len(d['b']), len(d.get('land', []))]
     json.dump({'tile': T, 'margin': MARGIN, 'box': [round(x0), round(z0), round(x1), round(z1)], 'tiles': index}, open(os.path.join(out, 'index.json'), 'w'), separators=(',', ':'))

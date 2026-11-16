@@ -23,7 +23,7 @@ function glassTextures(THREE, aniso) {
 }
 
 // a sloping slab between two points on the ground plan (the deck of a flyover)
-function slab(B, ax, az, ay, bx, bz, by, w, thick, hex) {
+export function slab(B, ax, az, ay, bx, bz, by, w, thick, hex) {
   const L = Math.hypot(bx - ax, bz - az) || 1, px = (-(bz - az) / L) * (w / 2), pz = ((bx - ax) / L) * (w / 2), cc = B.col(hex);
   const A0 = [ax + px, ay, az + pz], A1 = [ax - px, ay, az - pz], B0 = [bx + px, by, bz + pz], B1 = [bx - px, by, bz - pz];
   const dn = (p) => [p[0], p[1] - thick, p[2]], uv = [[0, 0], [1, 0], [1, 1], [0, 1]];
